@@ -2,6 +2,17 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.1] - 2026-09-03
+
+### Changed
+- **Dependency updates (via Dependabot):**
+  - `python-jose[cryptography]` 3.3.0 -> 3.4.0 (`backend/requirements.txt`)
+  - `python-multipart` 0.0.20 -> 0.0.31 (`backend/requirements.txt`)
+  - `pytest` 8.3.4 -> 9.0.3 (`backend/requirements-dev.txt`)
+
+All backend API tests and end-to-end browser tests pass with the updated
+dependencies.
+
 ## [Unreleased]
 
 ### Initial production release
