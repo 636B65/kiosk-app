@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+data/
+data_old/
+.git/
+.env
+.venv/
+offline/
+*.swp

@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: ./backend
+    image: kiosk/backend
+    container_name: kiosk-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/kiosk.db
+      - SECRET_KEY=change-me-in-production
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: kiosk/frontend
+    container_name: kiosk-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
