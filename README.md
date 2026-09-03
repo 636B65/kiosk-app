@@ -101,3 +101,30 @@ checksum check. See the scripts for details.
 The backend uses FastAPI with pinned dependencies in `backend/requirements.txt`.
 Run tests/verification with the FastAPI `TestClient` and Playwright browser
 tests, or simply exercise `docker compose up --build`.
+
+## Testing
+
+GitHub Actions runs both suites automatically on push to `main` and on pull
+requests (see `.github/workflows/ci.yml`). Run them locally:
+
+**Backend API tests** (pytest + FastAPI TestClient):
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest tests -v
+```
+
+**End-to-end tests** (Playwright against a live backend + nginx-proxied
+frontend, no Docker needed):
+
+```bash
+cd tests/e2e
+npm install
+# requires a Python 3.12 interpreter with backend deps installed
+E2E_PYTHON=python CHROMIUM_PATH=/usr/bin/chromium npm test
+```
+
+The e2e harness spawns its own backend and a static/proxy server, then drives
+`chromium`. Set `E2E_PYTHON` to a Python that can run the backend
+(`requirements-dev.txt` installed), and `CHROMIUM_PATH` to a Chromium binary.

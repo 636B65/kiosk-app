@@ -38,6 +38,12 @@ Initial commit of the complete kiosk application.
   - Air-gapped deployment scripts (`build-offline.sh`, `deploy-offline.sh`)
     for shipping to offline machines.
   - `.gitignore` / `.dockerignore` files.
+- **Testing / CI:**
+  - Backend API tests with pytest + FastAPI TestClient
+    (`backend/tests/test_api.py`).
+  - End-to-end Playwright browser tests (`tests/e2e/e2e.js`).
+  - GitHub Actions workflow (`.github/workflows/ci.yml`) running both suites on
+    every push to `main` and on pull requests.
 
 #### Changed
 - None (initial release).

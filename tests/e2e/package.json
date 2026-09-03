@@ -1,0 +1,13 @@
+{
+  "name": "kiosk-app-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "End-to-end Playwright tests for the Kiosk app",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node e2e.js"
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}
