@@ -2,13 +2,13 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
-## [Unreleased]
+## [1.0.2] - 2026-09-03
 
 ### Added
 - **GitHub Packages (GHCR) publishing pipeline** (`.github/workflows/publish-images.yml`):
   - Builds and publishes `ghcr.io/636b65/kiosk/backend` and
     `ghcr.io/636b65/kiosk/frontend` (linux/amd64) on every `v*` release tag.
-  - Images are tagged with the SEMVER version (e.g. `1.0.1`) and `latest`.
+  - Images are tagged with the SEMVER version (e.g. `1.0.2`) and `latest`.
   - `docker-compose.yml` continues to build from source; GHCR is an optional
     distribution channel.
 
