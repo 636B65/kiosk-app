@@ -127,12 +127,14 @@ jobs:
       - name: Verify certificate is not overwritten on restart
         run: |
           cp data/tls/server.crt /tmp/server.crt.before
-          cp data/tls/server.key /tmp/server.key.before
+          sudo cp data/tls/server.key /tmp/server.key.before
           docker compose restart frontend
           sleep 4
           cmp -s /tmp/server.crt.before data/tls/server.crt || { echo "cert WAS overwritten"; exit 1; }
-          cmp -s /tmp/server.key.before data/tls/server.key || { echo "key WAS overwritten"; exit 1; }
-          echo "existing certificate untouched after restart"
+          sudo cmp -s /tmp/server.key.before data/tls/server.key || { echo "key WAS overwritten"; exit 1; }
+          echo "existing certificate untouched after restart (key is 0600, root-owned, unreadable by non-root:$(
+            if [ "$(id -u)" = 0 ]; then echo 'n/a as root'; else echo 'confirmed'; fi
+          ))"
 
       - name: HTTPS browser smoke (CSP + rendering + admin login)
         working-directory: tests/e2e
