@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 from sqlalchemy import (
@@ -44,13 +45,28 @@ class Product(Base):
     name = Column(String, nullable=False)
     description = Column(Text, default="")
     price = Column(Float, nullable=False, default=0.0)
+    special_price = Column(Float, nullable=True)
+    is_weekly_special = Column(Boolean, default=False)
     stock = Column(Integer, default=0)
+    image_path = Column(String, default="")
     is_active = Column(Boolean, default=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     category = relationship("Category", back_populates="products")
     order_items = relationship("OrderItem", back_populates="product")
+
+    @property
+    def image_url(self):
+        if self.image_path:
+            return f"/api/images/{os.path.basename(self.image_path)}"
+        return None
+
+    @property
+    def effective_price(self):
+        if self.is_weekly_special and self.special_price is not None:
+            return self.special_price
+        return self.price
 
 
 class Customer(Base):

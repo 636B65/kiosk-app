@@ -111,9 +111,9 @@ server.listen(PORT, async () => {
     await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
     await page.waitForSelector(".product-card");
 
-    await step("customer: sees products in SEK", async () => {
+    await step("customer: sees products in EUR", async () => {
       const price = await page.locator(".product-price").first().textContent();
-      if (!price.includes("kr")) throw new Error("not SEK: " + price);
+      if (!price.includes("€")) throw new Error("not EUR: " + price);
       return price.trim();
     });
 
@@ -126,7 +126,7 @@ server.listen(PORT, async () => {
       const text = await page.locator("#cart-overlay").textContent();
       if (text.includes("Tax")) throw new Error("tax line still present");
       const total = await page.locator("#cart-overlay .cart-total-row").last().locator("span").last().textContent();
-      const expected = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "SEK", minimumFractionDigits: 2 }).format(19.98);
+      const expected = new Intl.NumberFormat("sv-SE", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(19.98);
       if (total.trim() !== expected.trim()) throw new Error(`total ${total} != ${expected}`);
       return `total = ${total.trim()} (2 × 9,99)`;
     });
@@ -195,7 +195,7 @@ server.listen(PORT, async () => {
       if (totalBlocks === 0) throw new Error("no item totals");
       if ((await modal.locator(".customer-stats").count()) === 0) throw new Error("no stats panel");
       const balance = await modal.locator(".balance-big").textContent();
-      if (!balance.includes("kr")) throw new Error("no SEK balance: " + balance);
+      if (!balance.includes("€")) throw new Error("no EUR balance: " + balance);
       return `balance ${balance.trim()}, ${totalBlocks} order(s), stats present`;
     });
 
@@ -229,7 +229,7 @@ server.listen(PORT, async () => {
       const labels = await page.locator(".stat-card .label").allTextContents();
       if (!labels.includes("Outstanding Balance")) throw new Error("no outstanding stat");
       const text = await page.locator(".stat-card", { hasText: "Outstanding Balance" }).textContent();
-      if (!text.includes("kr")) throw new Error("not SEK");
+      if (!text.includes("€")) throw new Error("not EUR");
       return text.replace(/\s+/g, " ").trim();
     });
 
@@ -257,14 +257,14 @@ server.listen(PORT, async () => {
       return `${rows} item(s) shown`;
     });
 
-    await step("admin: new product form is SEK, no image url", async () => {
+    await step("admin: new product form has image upload, EUR price", async () => {
       await page.locator('a[data-view="products"]').click();
       await page.waitForTimeout(600);
       await page.locator("button", { hasText: "+ New Product" }).click();
       await page.waitForSelector("#product-form");
       const labels = await page.locator("#product-form label").allTextContents();
-      if (!labels.some((l) => l.includes("Price (SEK)"))) throw new Error("no 'Price (SEK)' label: " + labels.join(" | "));
-      if (labels.some((l) => l.includes("Image URL"))) throw new Error("image url field still present");
+      if (!labels.some((l) => l.includes("Price (EUR)"))) throw new Error("no 'Price (EUR)' label: " + labels.join(" | "));
+      if ((await page.locator("#p-image-file").count()) !== 1) throw new Error("no image upload field");
       const body = await page.locator("#modal-overlay").textContent();
       if (body.includes("Price ($)")) throw new Error("currency still shows $");
       await page.locator("#product-form button", { hasText: "Cancel" }).click();
@@ -272,12 +272,46 @@ server.listen(PORT, async () => {
       return labels.filter((l) => l.includes("Price")).join(" | ");
     });
 
+    await step("admin: upload product image shows in admin list", async () => {
+      const row = page.locator("tr", { hasText: "USB-C Cable" }).first();
+      await row.locator(".edit-product").click();
+      await page.waitForSelector("#product-form");
+      await page.locator("#p-image-file").setInputFiles({
+        name: "cable.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          "base64"
+        ),
+      });
+      await page.locator("#product-form button[type=submit]").click();
+      await page.waitForTimeout(800);
+      const thumb = await page.locator("tr", { hasText: "USB-C Cable" }).locator(".thumb");
+      const src = await thumb.getAttribute("src");
+      if (!src || !src.startsWith("/api/images/")) throw new Error("no image src: " + src);
+      return "thumb src " + src;
+    });
+
+    await step("admin: mark product as weekly special", async () => {
+      const row = page.locator("tr", { hasText: "USB-C Cable" }).first();
+      await row.locator(".edit-product").click();
+      await page.waitForSelector("#product-form");
+      await page.locator("#p-weekly").check();
+      await page.waitForTimeout(100);
+      await page.locator("#p-special-price").fill("5.00");
+      await page.locator("#product-form button[type=submit]").click();
+      await page.waitForTimeout(800);
+      const badge = page.locator("tr", { hasText: "USB-C Cable" }).locator(".weekly-badge");
+      if ((await badge.count()) !== 1) throw new Error("no weekly badge in admin list");
+      return "weekly badge shown";
+    });
+
     await step("admin: customers page lists balance", async () => {
       await page.locator('a[data-view="customers"]').click();
       await page.waitForTimeout(600);
       const row = page.locator("tr", { hasText: "alice" });
       const text = await row.textContent();
-      if (!text.includes("kr")) throw new Error("no SEK balance");
+      if (!text.includes("€")) throw new Error("no EUR balance");
       if ((await row.locator(".reset-payment").count()) !== 1) throw new Error("reset button missing");
       return (await row.locator("td").nth(4).textContent()).trim();
     });
@@ -298,7 +332,7 @@ server.listen(PORT, async () => {
       await page.waitForTimeout(700);
       const row = page.locator("tr", { hasText: "alice" });
       const balText = (await row.locator("td").nth(4).textContent()).replace(/\s+/g, "");
-      if (balText !== "0,00kr") throw new Error("balance not reset: " + balText);
+      if (balText !== "0,00€") throw new Error("balance not reset: " + balText);
       return "payment reset → " + balText;
     });
 
@@ -330,6 +364,25 @@ server.listen(PORT, async () => {
       await page.waitForSelector(".product-card");
       const h = await page.locator(".kiosk-header h1").textContent();
       return h.trim();
+    });
+
+    await step("customer: product card shows uploaded image", async () => {
+      const img = page.locator(".product-card", { hasText: "USB-C Cable" }).locator(".product-image img");
+      const src = await img.getAttribute("src");
+      if (!src || !src.startsWith("/api/images/")) throw new Error("no product image on card: " + src);
+      return "card img " + src;
+    });
+
+    await step("customer: weekly special listed first with special price", async () => {
+      const first = page.locator(".product-grid .product-card").first();
+      const text = await first.textContent();
+      if (!text.includes("USB-C Cable")) throw new Error("special not first: " + text.replace(/\s+/g, " "));
+      if ((await first.locator(".weekly-badge").count()) !== 1) throw new Error("no weekly badge on card");
+      const oldP = await first.locator(".price-old").textContent();
+      const special = await first.locator(".price-special").textContent();
+      if (!oldP.includes("9,99")) throw new Error("old price missing: " + oldP);
+      if (!special.includes("5,00")) throw new Error("special price missing: " + special);
+      return "special first: " + oldP + " → " + special;
     });
   } catch (e) {
     results.push("FAIL  outer — " + e.message);

@@ -51,9 +51,10 @@ def admin_headers(client):
 # --------------------------------------------------------------------------- #
 # Currency / pricing
 # --------------------------------------------------------------------------- #
-def test_products_have_no_image_url(products):
+def test_products_expose_optional_image_url(products):
     for p in products:
-        assert "image_url" not in p
+        assert "image_url" in p
+        assert p["image_url"] is None or p["image_url"].startswith("/api/images/")
 
 
 def test_products_are_sek_priced(products):
@@ -183,3 +184,109 @@ def test_mark_order_paid(client, products, admin_headers):
     after = client.get("/api/customers/alice").json()
     assert after["total_paid"] > paid_before
     assert after["balance"] == pytest.approx(0)
+
+
+# --------------------------------------------------------------------------- #
+# Product images
+# --------------------------------------------------------------------------- #
+def _sample_png() -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"  # signature
+        b"\x00\x00\x00\rIHDR"  # chunk header
+        + (8).to_bytes(4, "big") + (8).to_bytes(4, "big") + (8).to_bytes(5, "big")
+        + b"\x00\x00\x00\x00IDATA"  # start IDAT placeholder
+    )
+
+
+def test_upload_product_image(client, admin_headers, products):
+    pid = products[0]["id"]
+    r = client.post(
+        f"/api/products/{pid}/image",
+        headers=admin_headers,
+        files={"file": ("test.png", _sample_png(), "image/png")},
+    )
+    assert r.status_code == 200, r.text
+    url = r.json()["image_url"]
+    assert url and url.startswith("/api/images/")
+
+    # Image should be fetchable
+    img = client.get(url)
+    assert img.status_code == 200
+    assert img.headers["content-type"] == "image/png"
+
+    # Requires auth
+    unauth = client.post(
+        f"/api/products/{pid}/image",
+        files={"file": ("x.png", _sample_png(), "image/png")},
+    )
+    assert unauth.status_code in (401, 422)
+
+
+def test_upload_rejects_bad_type(client, admin_headers, products):
+    pid = products[0]["id"]
+    r = client.post(
+        f"/api/products/{pid}/image",
+        headers=admin_headers,
+        files={"file": ("x.txt", b"hello", "text/plain")},
+    )
+    assert r.status_code == 400
+
+
+def test_delete_product_image(client, admin_headers, products):
+    pid = products[0]["id"]
+    url = client.get(f"/api/products/{pid}").json()["image_url"]
+    # ensure there is an image attached first
+    if not url:
+        client.post(
+            f"/api/products/{pid}/image",
+            headers=admin_headers,
+            files={"file": ("t.png", _sample_png(), "image/png")},
+        )
+        url = client.get(f"/api/products/{pid}").json()["image_url"]
+        assert url, "image should have been uploaded"
+    r = client.delete(f"/api/products/{pid}/image", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json()["image_url"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Weekly specials
+# --------------------------------------------------------------------------- #
+def test_product_weekly_special_fields(client, admin_headers, products):
+    pid = products[0]["id"]
+    r = client.put(
+        f"/api/products/{pid}",
+        headers=admin_headers,
+        json={"is_weekly_special": True, "special_price": 1.5},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["is_weekly_special"] is True
+    assert data["special_price"] == pytest.approx(1.5)
+
+
+def test_order_uses_special_price_for_weekly_special(client, admin_headers, products):
+    # Make the first product a weekly special priced below its normal price.
+    pid = products[0]["id"]
+    normal = products[0]["price"]
+    client.put(
+        f"/api/products/{pid}",
+        headers=admin_headers,
+        json={"is_weekly_special": True, "special_price": 1.0},
+    )
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "special_tester", "items": [{"product_id": pid, "quantity": 2}]},
+    )
+    assert r.status_code == 201
+    order = r.json()
+    assert order["total"] == pytest.approx(2.0)
+    assert order["total"] != pytest.approx(normal * 2)
+
+    # Non-special products still use their normal price.
+    r2 = client.post(
+        "/api/orders",
+        json={"customer_username": "special_tester", "items": [{"product_id": products[1]["id"], "quantity": 1}]},
+    )
+    assert r2.status_code == 201
+    assert r2.json()["total"] == pytest.approx(products[1]["price"])

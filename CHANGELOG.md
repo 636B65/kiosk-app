@@ -2,6 +2,40 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.3] - 2026-09-05
+
+### Added
+- **Configurable store currency**: the admin picks the display currency in
+  Settings (23 currencies supported, default **EUR**). All prices, cart totals,
+  balances, reports, and dashboards render in the selected currency.
+- **Product image uploads**:
+  - Admins can upload a product photo (PNG/JPEG/WebP/GIF, max 5 MB) from the
+    product form and remove it again.
+  - Photos are stored on disk next to the database (`./data/product_images/`)
+    in the existing bind mount, so they survive container rebuilds.
+  - Products now expose an `image_url`; the kiosk and admin list show the photo
+    (with a letter placeholder when none is set).
+  - New endpoints: `POST /api/products/{id}/image` and
+    `DELETE /api/products/{id}/image`; images are served under `/api/images/`.
+- **Weekly specials**:
+  - Admins can mark a product as a weekly special and set a special price.
+  - Special products are listed at the **top of the shop** with a badge and the
+    discounted price (original price struck through).
+  - Carts and orders charge the special price; order lines, customer balances,
+    and reports all reflect it.
+
+### Changed
+- Product API responses include `image_url`, `is_weekly_special`, and
+  `special_price`. A startup migration adds the new columns to existing
+  databases in place (see `backend/migrations.py`).
+- Order pricing uses the effective (special) price of weekly-special products.
+
+### Notes
+- Existing databases are upgraded automatically on backend startup; no manual
+  migration step is needed.
+
+All backend API tests and end-to-end browser tests pass.
+
 ## [1.0.2] - 2026-09-03
 
 ### Added

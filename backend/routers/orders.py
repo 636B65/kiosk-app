@@ -71,14 +71,14 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
                 detail=f"Insufficient stock for '{product.name}' ({product.stock} left)",
             )
         product.stock -= item.quantity
-        line_total = product.price * item.quantity
+        line_total = product.effective_price * item.quantity
         subtotal += line_total
         order.items.append(
             OrderItem(
                 product_id=product.id,
                 product_name=product.name,
                 quantity=item.quantity,
-                unit_price=product.price,
+                unit_price=product.effective_price,
             )
         )
 

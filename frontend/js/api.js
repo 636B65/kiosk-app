@@ -35,4 +35,7 @@ const API = {
         return this.request(path, { method: "PATCH", body: JSON.stringify(body) });
     },
     del(path) { return this.request(path, { method: "DELETE" }); },
+    upload(path, formData) {
+        return this.request(path, { method: "POST", body: formData });
+    },
 };

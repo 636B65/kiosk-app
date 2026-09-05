@@ -63,6 +63,22 @@ def migrate(engine: Engine) -> None:
             # Drop the image URL column, screens no longer use it.
             _drop_column(conn, "products", "image_url")
 
+            # Product uploads are stored as files; keep a reference path.
+            if "image_path" not in cols:
+                conn.execute(
+                    text("ALTER TABLE products ADD COLUMN image_path VARCHAR DEFAULT ''")
+                )
+
+            # Weekly specials: flag + optional lower special price.
+            if "is_weekly_special" not in cols:
+                conn.execute(
+                    text("ALTER TABLE products ADD COLUMN is_weekly_special BOOLEAN DEFAULT 0")
+                )
+            if "special_price" not in cols:
+                conn.execute(
+                    text("ALTER TABLE products ADD COLUMN special_price FLOAT")
+                )
+
         if "orders" in tables:
             columns = [row[1] for row in conn.execute(text("PRAGMA table_info(orders)"))]
 

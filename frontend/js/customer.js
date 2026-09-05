@@ -53,12 +53,13 @@ const Kiosk = {
     },
 
     renderProductGrid() {
-        const products = Store.products.filter((p) => {
+        const filtered = Store.products.filter((p) => {
             if (Store.activeCategory && p.category_id !== Store.activeCategory) return false;
             const search = (document.getElementById("search-input")?.value || "").toLowerCase();
             if (search && !p.name.toLowerCase().includes(search)) return false;
             return true;
         });
+        const products = sortShopProducts(filtered);
         const container = document.getElementById("product-grid-container");
         if (!container) return;
         container.innerHTML = `
@@ -76,12 +77,18 @@ const Kiosk = {
         const qty = inCart ? inCart.quantity : 0;
         const soldOut = p.stock <= 0;
         const lowStock = p.stock > 0 && p.stock <= 5;
+        const isSpecial = p.is_weekly_special && p.special_price != null;
         return `
             <div class="product-card">
+                ${isSpecial ? '<div class="weekly-badge">⚡ Weekly special</div>' : ""}
                 <div class="product-image">${renderProductImage(p)}</div>
                 <div class="product-name">${esc(p.name)}</div>
                 <div class="product-desc">${esc(p.description)}</div>
-                <div class="product-price">${fmt(p.price)}</div>
+                <div class="product-price">
+                    ${isSpecial
+                        ? `<span class="price-old">${fmt(p.price)}</span> <span class="price-special">${fmt(p.special_price)}</span>`
+                        : fmt(p.price)}
+                </div>
                 <div class="stock-label ${lowStock ? "stock-low" : ""} ${soldOut ? "stock-out" : ""}">
                     ${soldOut ? "Out of stock" : `${p.stock} in stock`}
                 </div>
@@ -117,7 +124,7 @@ const Kiosk = {
             }
             item.quantity += 1;
         } else {
-            Store.cart.push({ product_id: product.id, name: product.name, price: product.price, quantity: 1 });
+            Store.cart.push({ product_id: product.id, name: product.name, price: effectivePrice(product), quantity: 1 });
         }
         Store.saveCart();
         this.refreshUI();

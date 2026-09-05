@@ -109,19 +109,62 @@ const Modal = {
     },
 };
 
-const fmt = (n) =>
-    new Intl.NumberFormat("sv-SE", {
+const SUPPORTED_CURRENCIES = {
+    AED: "UAE Dirham",
+    AUD: "Australian Dollar",
+    BRL: "Brazilian Real",
+    CAD: "Canadian Dollar",
+    CHF: "Swiss Franc",
+    CNY: "Chinese Yuan",
+    DKK: "Danish Krone",
+    EUR: "Euro",
+    GBP: "British Pound",
+    HKD: "Hong Kong Dollar",
+    INR: "Indian Rupee",
+    JPY: "Japanese Yen",
+    KRW: "South Korean Won",
+    MXN: "Mexican Peso",
+    NOK: "Norwegian Krone",
+    NZD: "New Zealand Dollar",
+    PLN: "Polish Zloty",
+    RUB: "Russian Ruble",
+    SEK: "Swedish Krona",
+    SGD: "Singapore Dollar",
+    USD: "US Dollar",
+    ZAR: "South African Rand",
+};
+
+const fmt = (n) => {
+    const currency = Store.settings.currency || "EUR";
+    const code = SUPPORTED_CURRENCIES[currency] ? currency : "EUR";
+    return new Intl.NumberFormat("sv-SE", {
         style: "currency",
-        currency: "SEK",
+        currency: code,
         minimumFractionDigits: 2,
     }).format(n ?? 0);
+};
+
+const effectivePrice = (p) =>
+    p && p.is_weekly_special && p.special_price != null ? p.special_price : (p?.price || 0);
 
 const esc = (s) =>
     String(s ?? "").replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
 
+function sortShopProducts(products) {
+    return [...products].sort((a, b) => {
+        const aSpec = a.is_weekly_special ? 0 : 1;
+        const bSpec = b.is_weekly_special ? 0 : 1;
+        if (aSpec !== bSpec) return aSpec - bSpec;
+        return a.name.localeCompare(b.name);
+    });
+}
+
 function renderProductImage(product) {
+    if (product.image_url) {
+        return `<img src="${esc(product.image_url)}" alt="${esc(product.name)}">`;
+    }
     return `<span>${esc(product.name.charAt(0).toUpperCase())}</span>`;
 }
 

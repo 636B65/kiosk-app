@@ -31,6 +31,8 @@ class ProductBase(BaseModel):
     name: str
     description: str = ""
     price: float = 0.0
+    special_price: Optional[float] = None
+    is_weekly_special: bool = False
     stock: int = 0
     is_active: bool = True
     category_id: Optional[int] = None
@@ -44,6 +46,8 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     price: Optional[float] = None
+    special_price: Optional[float] = None
+    is_weekly_special: Optional[bool] = None
     stock: Optional[int] = None
     is_active: Optional[bool] = None
     category_id: Optional[int] = None
@@ -51,6 +55,7 @@ class ProductUpdate(BaseModel):
 
 class ProductOut(ProductBase):
     id: int
+    image_url: Optional[str] = None
     category: Optional[CategoryOut] = None
 
     class Config:

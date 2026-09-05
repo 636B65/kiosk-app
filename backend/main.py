@@ -1,9 +1,12 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import models  # noqa: F401
+from config import settings as app_settings
 from database import Base, SessionLocal, engine
 from migrations import migrate
 from routers import auth, categories, customers, orders, products, reports, settings, users
@@ -40,6 +43,13 @@ app.include_router(orders.router)
 app.include_router(reports.router)
 app.include_router(settings.router)
 app.include_router(users.router)
+
+_image_dir = os.path.join(
+    os.path.dirname(os.path.abspath(app_settings.database_path)) or ".",
+    "product_images",
+)
+os.makedirs(_image_dir, exist_ok=True)
+app.mount("/api/images", StaticFiles(directory=_image_dir), name="product-images")
 
 
 @app.get("/api/health")

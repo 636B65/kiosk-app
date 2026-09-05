@@ -15,11 +15,15 @@ Built to run fully **offline (air-gapped)** via Docker Compose.
 - Checkout by entering a username (auto-creates the customer on first purchase)
 - Purchases are added to the customer's balance (paid later at the counter)
 - "User lookup" to view your balance, stats, and full monthly order history
-- All prices in **SEK**
+- All prices in **EUR** (admin can change the currency in Settings)
+- Product photos uploaded by the admin (PNG/JPEG/WebP/GIF, up to 5 MB)
+- Weekly specials: admin marks products with a special price and they appear at
+  the top of the shop with the discounted price
 
 **Admin panel** (`/#admin`)
 - Dashboard: outstanding balance, today/week/month/all-time sales, low stock
-- Products/Categories management
+- Products/Categories management, including product image upload and weekly
+  specials (special price, listed at the top of the shop)
 - Orders with paid/cancelled statuses and per-order item detail
 - Customers: balances, per-customer stats, monthly history, reset payment
 - Reports with outstanding balance and sales breakdown
@@ -32,7 +36,8 @@ Built to run fully **offline (air-gapped)** via Docker Compose.
 | Backend   | Python 3.12, FastAPI, SQLAlchemy, SQLite, JWT auth      |
 | Frontend  | Vanilla HTML/CSS/JS served by nginx                     |
 | Runtime   | Docker Compose (backend + nginx frontend)               |
-| Storage   | SQLite database file bound-mounted at `./data/kiosk.db` |
+| Storage   | SQLite database file bound-mounted at `./data/kiosk.db`; product images
+              stored in `./data/product_images/` |
 
 ## Getting started
 
@@ -52,9 +57,12 @@ requests to it.
 ### Database
 
 - Data lives in `./data/kiosk.db` (a bind mount, not baked into the image).
+- Uploaded product images live in `./data/product_images/` (same bind mount, so
+  they survive container rebuilds too).
 - **Migrations run automatically** on backend startup — existing databases are
   upgraded in place, so updates never require a manual step or data wipe.
-- Back up the DB before updates: `cp data/kiosk.db data/kiosk.db.bak`
+- Back up the DB (and product images) before updates:
+  `cp -r data data.bak`
 
 ## Project layout
 

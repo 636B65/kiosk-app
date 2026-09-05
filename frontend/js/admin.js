@@ -202,7 +202,7 @@ const Admin = {
                             ${summary.low_stock_products.length === 0
                                 ? '<tr><td colspan="3">All stock levels are healthy</td></tr>'
                                 : summary.low_stock_products.map((p) => `
-                                    <tr><td>${esc(p.name)}</td><td style="color:var(--warning);"><strong>${p.stock}</strong></td><td>${fmt(p.price)}</td></tr>
+                                    <tr><td>${esc(p.name)}</td><td style="color:var(--warning);"><strong>${p.stock}</strong></td><td>${fmt(effectivePrice(p))}</td></tr>
                                 `).join("")}
                         </tbody>
                     </table>
@@ -223,14 +223,17 @@ const Admin = {
                 </div>
                 <div class="panel">
                 <table>
-                    <thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>ID</th><th>Name</th><th>Image</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
                     <tbody>
                         ${products.map((p) => `
                             <tr>
                                 <td>${p.id}</td>
-                                <td>${esc(p.name)}</td>
+                                <td>${esc(p.name)}${p.is_weekly_special ? ' <span class="weekly-badge">⚡ Weekly</span>' : ""}</td>
+                                <td>${p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : "—"}</td>
                                 <td>${p.category ? esc(p.category.name) : "—"}</td>
-                                <td>${fmt(p.price)}</td>
+                                <td>${p.is_weekly_special && p.special_price != null
+                                    ? `<span class="price-old">${fmt(p.price)}</span> <span class="price-special">${fmt(p.special_price)}</span>`
+                                    : fmt(p.price)}</td>
                                 <td style="${p.stock <= 5 ? "color:var(--warning); font-weight:600;" : ""}">${p.stock}</td>
                                 <td>${p.is_active ? '<span class="status-badge status-completed">Active</span>' : '<span class="status-badge status-cancelled">Inactive</span>'}</td>
                                 <td class="table-actions">
@@ -269,8 +272,33 @@ const Admin = {
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Price (SEK)</label>
+                    <label>Price (${esc(Store.settings.currency || "EUR")})</label>
                     <input id="p-price" type="number" step="0.01" min="0" value="${product?.price ?? ""}" required>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:0.5rem;">
+                        <input type="checkbox" id="p-weekly" ${product?.is_weekly_special ? "checked" : ""}>
+                        ⚡ Weekly special (listed at top of the shop)
+                    </label>
+                </div>
+                <div class="form-group" style="display:${product?.is_weekly_special ? "" : "none"};">
+                    <label>Special price (${esc(Store.settings.currency || "EUR")})</label>
+                    <input id="p-special-price" type="number" step="0.01" min="0" value="${product?.special_price ?? ""}">
+                </div>
+                <div class="form-group">
+                    <label>Product Image</label>
+                    <div id="p-image-preview" class="image-preview">
+                        ${product?.image_url
+                            ? `<img src="${esc(product.image_url)}" alt="">`
+                            : '<span class="image-preview-empty">No image</span>'}
+                    </div>
+                    <input id="p-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+                    ${product?.image_url ? `
+                        <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem;">
+                            <input type="checkbox" id="p-image-remove">
+                            Remove current image
+                        </label>
+                    ` : ""}
                 </div>
                 <div class="form-group">
                     <label>Stock</label>
@@ -288,8 +316,15 @@ const Admin = {
                 </div>
             </form>
         `);
+        document.getElementById("p-weekly").addEventListener("change", (e) => {
+            const group = document.getElementById("p-special-price").closest(".form-group");
+            if (group) group.style.display = e.target.checked ? "" : "none";
+            if (!e.target.checked) document.getElementById("p-special-price").value = "";
+        });
         document.getElementById("product-form").addEventListener("submit", async (e) => {
             e.preventDefault();
+            const isWeekly = document.getElementById("p-weekly").checked;
+            const specialPriceInput = document.getElementById("p-special-price").value;
             const payload = {
                 name: document.getElementById("p-name").value.trim(),
                 description: document.getElementById("p-desc").value,
@@ -297,15 +332,24 @@ const Admin = {
                 price: parseFloat(document.getElementById("p-price").value) || 0,
                 stock: parseInt(document.getElementById("p-stock").value) || 0,
                 is_active: document.getElementById("p-active").checked,
+                is_weekly_special: isWeekly,
+                special_price: isWeekly && specialPriceInput !== "" ? parseFloat(specialPriceInput) : null,
             };
             try {
-                if (id) {
-                    await API.put(`/products/${id}`, payload);
-                    Toast.success("Product updated");
-                } else {
-                    await API.post("/products", payload);
-                    Toast.success("Product created");
+                const result = id
+                    ? await API.put(`/products/${id}`, payload)
+                    : await API.post("/products", payload);
+                const productId = id || result.id;
+                const fileInput = document.getElementById("p-image-file");
+                const removeImage = document.getElementById("p-image-remove");
+                if (fileInput && fileInput.files && fileInput.files.length > 0) {
+                    const formData = new FormData();
+                    formData.append("file", fileInput.files[0]);
+                    await API.upload(`/products/${productId}/image`, formData);
+                } else if (removeImage && removeImage.checked) {
+                    await API.del(`/products/${productId}/image`);
                 }
+                Toast.success(id ? "Product updated" : "Product created");
                 Modal.close();
                 this.renderProducts();
             } catch (err) {
@@ -851,6 +895,16 @@ const Admin = {
                         <label>Receipt Footer</label>
                         <textarea id="s-receipt_footer" rows="2">${esc(settings.receipt_footer || "")}</textarea>
                     </div>
+                    <div class="form-group">
+                        <label>Currency</label>
+                        <select id="s-currency">
+                            ${Object.entries(SUPPORTED_CURRENCIES).map(([code, name]) => `
+                                <option value="${code}" ${(settings.currency || "EUR") === code ? "selected" : ""}>
+                                    ${code} — ${esc(name)}
+                                </option>
+                            `).join("")}
+                        </select>
+                    </div>
                     <button class="btn btn-primary" onclick="Admin.saveSettings()">Save Settings</button>
                 </div>
             </div>
@@ -861,6 +915,7 @@ const Admin = {
         const fields = {
             store_name: document.getElementById("s-store_name").value.trim(),
             receipt_footer: document.getElementById("s-receipt_footer").value,
+            currency: document.getElementById("s-currency").value,
         };
         try {
             for (const [key, value] of Object.entries(fields)) {
