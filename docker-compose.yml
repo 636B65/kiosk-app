@@ -24,7 +24,13 @@ services:
     image: kiosk/frontend
     container_name: kiosk-frontend
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
+    volumes:
+      # TLS certificate and key. A self-signed pair is generated on first start
+      # and never overwritten again; replace them by dropping your own
+      # server.crt / server.key into ./data/tls (e.g. a real CA-signed cert).
+      - ./data/tls:/etc/nginx/certs
     depends_on:
       - backend
     restart: unless-stopped

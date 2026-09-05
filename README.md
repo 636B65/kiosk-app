@@ -48,14 +48,15 @@ Requires Docker with the Compose plugin.
 docker compose up --build
 ```
 
-- Customer kiosk: http://localhost:8080
-- Admin panel: http://localhost:8080/#admin
+- Customer kiosk: https://localhost
+- Admin panel: https://localhost/#admin
+- Plain HTTP on port 80 redirects to HTTPS (443).
 - Default admin login: set the `ADMIN_PASSWORD` environment variable before
   first start; if unset a strong random password is generated and printed in
   the backend logs on first boot. **No hardcoded default credentials are used.**
 
-The backend runs on http://localhost:8000 and the frontend proxies `/api/`
-requests to it.
+The backend runs on http://localhost:8000 (internal only) and the frontend
+nginx proxies `/api/` requests to it over Docker's network.
 
 ### Configuration
 
@@ -65,6 +66,18 @@ requests to it.
   (which invalidates existing sessions on restart). **Never use a hardcoded key.**
 - **`ADMIN_PASSWORD`**: used to create the `admin` account on first boot. If unset,
   a random password is generated and printed in the backend logs.
+
+### TLS / HTTPS
+
+- The frontend serves HTTPS on port 443 and redirects port 80 to it.
+- On **first** start (`docker compose up --build`) a **self-signed certificate**
+  is generated into `./data/tls/server.crt` + `server.key` (bind-mounted to
+  `/etc/nginx/certs` inside the container). Your browser will show a warning
+  for self-signed certificates — accept it for local use.
+- The certificate is **never overwritten** once it exists, so you can later
+  replace it with a real (CA-signed) certificate by dropping your own
+  `server.crt` / `server.key` into `./data/tls/` and restarting the frontend:
+  `docker compose restart frontend`.
 
 ### Database
 
@@ -82,7 +95,7 @@ requests to it.
 backend/            FastAPI application (models, routers, auth, seed, migrations)
   routers/          API route modules (auth, categories, customers, orders, ...)
 frontend/           Static customer kiosk + admin panel (HTML/CSS/JS, nginx)
-docker-compose.yml  Services: backend (8000) + frontend (8080)
+docker-compose.yml  Services: backend (8000) + frontend (80->443 HTTPS)
 build-offline.sh    Build images + bundle for an air-gapped target
 deploy-offline.sh   Load + start the bundled images on an offline machine
 ```

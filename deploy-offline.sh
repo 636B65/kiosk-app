@@ -44,12 +44,18 @@ if [ -f docker-compose.yml ] && [ -f kiosk-backend.tar.gz ]; then
 elif [ -n "$ARCHIVE" ] || [ -f "offline/kiosk-app.tar.gz" ] || [ -f "kiosk-app.tar.gz" ]; then
   ARCHIVE="${ARCHIVE:-$( [ -f offline/kiosk-app.tar.gz ] && echo offline/kiosk-app.tar.gz || echo kiosk-app.tar.gz )}"
 
-  # Preserve a live DB before tar overwrites anything.
+  # Preserve a live DB and any TLS certificate before tar overwrites anything.
   LIVE_DB=""
   if [ -f "$TARGET/data/kiosk.db" ]; then
     LIVE_DB="$(mktemp)"
     cp "$TARGET/data/kiosk.db" "$LIVE_DB"
     echo "==> Preserving live database from previous deploy"
+  fi
+  LIVE_TLS=""
+  if [ -d "$TARGET/data/tls" ]; then
+    LIVE_TLS="$(mktemp -d)"
+    cp -a "$TARGET/data/tls/." "$LIVE_TLS/"
+    echo "==> Preserving TLS certificate from previous deploy"
   fi
 
   echo "==> Unpacking $ARCHIVE"
@@ -60,6 +66,12 @@ elif [ -n "$ARCHIVE" ] || [ -f "offline/kiosk-app.tar.gz" ] || [ -f "kiosk-app.t
     cp "$LIVE_DB" "$TARGET/data/kiosk.db"
     rm -f "$LIVE_DB"
     echo "==> Restored live database over the shipped bundle"
+  fi
+  if [ -n "$LIVE_TLS" ]; then
+    mkdir -p "$TARGET/data/tls"
+    cp -a "$LIVE_TLS/." "$TARGET/data/tls/"
+    rm -rf "$LIVE_TLS"
+    echo "==> Restored TLS certificate over the shipped bundle"
   fi
   cd "$TARGET"
 else
@@ -99,5 +111,9 @@ docker compose ps
 
 echo
 echo "Kiosk is running offline."
-echo "  Customer: http://<this-machine>:8080"
-echo "  Admin:    http://<this-machine>:8080/#admin"
+echo "  Customer: https://<this-machine>"
+echo "  Admin:    https://<this-machine>/#admin"
+echo
+echo "TLS uses a self-signed certificate (browser will warn) generated on first"
+echo "start in ./data/tls/. To use your own certificate, replace server.crt and"
+echo "server.key there and restart the frontend: docker compose restart frontend"

@@ -147,8 +147,8 @@ def test_secret_key_is_not_hardcoded(client):
 def test_cors_blocks_foreign_origins(client):
     r = client.get("/api/health", headers={"Origin": "https://evil.example.com"})
     assert r.headers.get("access-control-allow-origin") is None
-    r = client.get("/api/health", headers={"Origin": "http://localhost:8080"})
-    assert r.headers.get("access-control-allow-origin") == "http://localhost:8080"
+    r = client.get("/api/health", headers={"Origin": "https://localhost"})
+    assert r.headers.get("access-control-allow-origin") == "https://localhost"
 
 
 def test_login_rate_limited_after_failures(client):

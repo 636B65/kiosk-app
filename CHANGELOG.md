@@ -2,6 +2,31 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.7] - 2026-09-05
+
+### Changed
+- **HTTPS by default with self-signed certificate**:
+  - The frontend now serves HTTPS on port **443** and redirects plain HTTP on
+    port **80** to it (`301`). The host port mapping changed from `8080` to
+    `80`/`443`.
+  - On first start (`docker compose up --build`) a **self-signed certificate**
+    is generated into `./data/tls/server.crt` + `server.key`
+    (`openssl req -x509`, valid 10 years, bind-mounted to `/etc/nginx/certs`).
+  - The certificate is **never overwritten** once it exists: replace it by
+    dropping your own `server.crt`/`server.key` into `./data/tls/` and running
+    `docker compose restart frontend` (e.g. a real CA-signed certificate).
+  - `frontend/nginx.conf`: separate `443 ssl` server block, `Strict-Transport-
+    Security` header added, `/api/` proxy sends `X-Forwarded-Proto: https`.
+  - `frontend/Dockerfile`: installs `openssl`; new
+    `docker-entrypoint.d/40-create-selfsigned-cert.sh` generates the cert on
+    first boot only.
+- **Backend CORS defaults** now allow `https://localhost` / `http://localhost`
+  (and `127.0.0.1` equivalents) instead of the removed `:8080` origins.
+- **Offline deployment**: `deploy-offline.sh` reports the new `https` URLs and
+  preserves an existing `./data/tls` certificate across re-deploys.
+
+All backend API tests and end-to-end browser tests pass.
+
 ## [1.0.6] - 2026-09-05
 
 ### Changed
