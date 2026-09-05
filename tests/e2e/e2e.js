@@ -20,7 +20,15 @@ try { fs.unlinkSync(DB); } catch {}
 const backend = spawn(
   PYTHON,
   ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", String(BACKEND_PORT)],
-  { cwd: BACKEND_CWD, env: { ...process.env, DATABASE_PATH: DB }, stdio: "ignore" }
+  {
+    cwd: BACKEND_CWD,
+    env: {
+      ...process.env,
+      DATABASE_PATH: DB,
+      ADMIN_PASSWORD: process.env.E2E_ADMIN_PASSWORD || "test-admin-password",
+    },
+    stdio: "ignore",
+  }
 );
 
 function waitForBackend(retries = 60) {
@@ -222,7 +230,7 @@ server.listen(PORT, async () => {
     await page.waitForSelector(".auth-card", { timeout: 7000 });
     await step("admin: login", async () => {
       await page.fill("#login-username", "admin");
-      await page.fill("#login-password", "admin123");
+      await page.fill("#login-password", process.env.E2E_ADMIN_PASSWORD || "test-admin-password");
       await page.click("#login-form button[type=submit]");
       await page.waitForSelector(".admin-layout", { timeout: 5000 });
       await page.waitForSelector(".stat-card", { timeout: 5000 });

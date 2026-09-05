@@ -9,7 +9,14 @@ services:
       - ./data:/app/data
     environment:
       - DATABASE_PATH=/app/data/kiosk.db
-      - SECRET_KEY=change-me-in-production
+      # Generate a fresh random JWT signing key on each container start unless
+      # a stable value is provided. Never use a hardcoded key in production.
+      - SECRET_KEY=${SECRET_KEY:-}
+      # Optional: set a known password for the initial 'admin' account.
+      # If unset a random password is generated and printed in the backend logs.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # Comma-separated list of allowed browser origins (defaults to localhost).
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
     restart: unless-stopped
 
   frontend:

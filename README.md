@@ -50,10 +50,21 @@ docker compose up --build
 
 - Customer kiosk: http://localhost:8080
 - Admin panel: http://localhost:8080/#admin
-- Default admin login: `admin` / `admin123` (change before production)
+- Default admin login: set the `ADMIN_PASSWORD` environment variable before
+  first start; if unset a strong random password is generated and printed in
+  the backend logs on first boot. **No hardcoded default credentials are used.**
 
 The backend runs on http://localhost:8000 and the frontend proxies `/api/`
 requests to it.
+
+### Configuration
+
+- **`SECRET_KEY`** (JWT signing key): set a strong, stable value before
+  deployment, e.g. `docker compose run -e SECRET_KEY=$(openssl rand -hex 32) ...` or
+  in your `.env` used by Compose. If unset, a random key is generated at startup
+  (which invalidates existing sessions on restart). **Never use a hardcoded key.**
+- **`ADMIN_PASSWORD`**: used to create the `admin` account on first boot. If unset,
+  a random password is generated and printed in the backend logs.
 
 ### Database
 

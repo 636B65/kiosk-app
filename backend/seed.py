@@ -1,7 +1,29 @@
+import os
+import secrets
+
 from sqlalchemy.orm import Session
 
 from models import Category, Product, Setting, User
 from security import get_password_hash
+
+
+def _initial_admin_password() -> str:
+    """Return the admin password from env or a fresh random one.
+
+    Never fall back to a well-known value. When ADMIN_PASSWORD is not set,
+    a strong random password is generated and logged so the operator can
+    retrieve it on first boot.
+    """
+    password = os.environ.get("ADMIN_PASSWORD")
+    if password:
+        return password
+    generated = secrets.token_urlsafe(18)
+    print(
+        "[seed] No ADMIN_PASSWORD set - generated a random password for the "
+        f"'admin' account (save it now): {generated}",
+        flush=True,
+    )
+    return generated
 
 
 def seed(db: Session):
@@ -9,7 +31,7 @@ def seed(db: Session):
     if not admin:
         admin = User(
             username="admin",
-            password_hash=get_password_hash("admin123"),
+            password_hash=get_password_hash(_initial_admin_password()),
             full_name="Store Administrator",
         )
         db.add(admin)

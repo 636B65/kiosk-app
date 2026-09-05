@@ -21,6 +21,30 @@ ALLOWED_IMAGE_TYPES = {
 }
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
+_MAGIC_BY_SIGNATURE = [
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+]
+# WebP: "RIFF" (0-3) + size (4-7) + "WEBP" (8-11)
+_WEBP_HEAD = b"RIFF"
+_WEBP_MAGIC = b"WEBP"
+
+
+def _detect_image_type(data: bytes) -> str | None:
+    """Return the real content type from file signature bytes."""
+    for sig, mime in _MAGIC_BY_SIGNATURE:
+        if data.startswith(sig):
+            return mime
+    if (
+        len(data) >= 12
+        and data.startswith(_WEBP_HEAD)
+        and data[8:12] == _WEBP_MAGIC
+    ):
+        return "image/webp"
+    return None
+
 
 def images_dir() -> str:
     directory = os.path.join(
@@ -123,7 +147,8 @@ def upload_product_image(
     product = db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    ext = ALLOWED_IMAGE_TYPES.get(file.content_type or "")
+    declared = file.content_type or ""
+    ext = ALLOWED_IMAGE_TYPES.get(declared)
     if not ext:
         raise HTTPException(
             status_code=400,
@@ -134,6 +159,13 @@ def upload_product_image(
         raise HTTPException(status_code=400, detail="Empty file")
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image too large (max 5 MB)")
+
+    actual_type = _detect_image_type(data)
+    if actual_type is None or ALLOWED_IMAGE_TYPES.get(actual_type) != ext:
+        raise HTTPException(
+            status_code=400,
+            detail="File content does not match the declared image type",
+        )
 
     _remove_image_file(product.image_path)
     filename = f"{uuid.uuid4().hex}{ext}"

@@ -17,6 +17,9 @@ sys.path.insert(0, str(BACKEND_DIR))
 # Use a temporary DB for every test run.
 DB = Path(os.environ.get("KIOSK_TEST_DB", "/tmp/kiosk-test.db")).resolve()
 os.environ["DATABASE_PATH"] = str(DB)
+# Seed creates the admin account with ADMIN_PASSWORD (or a random password).
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "test-admin-password")
+os.environ["ADMIN_PASSWORD"] = ADMIN_PASSWORD
 try:
     DB.unlink()
 except FileNotFoundError:
@@ -43,7 +46,7 @@ def products(client):
 
 @pytest.fixture(scope="session")
 def admin_headers(client):
-    r = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    r = client.post("/api/auth/login", json={"username": "admin", "password": ADMIN_PASSWORD})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
@@ -105,6 +108,100 @@ def test_checkout_requires_username(client, products):
 
 def test_lookup_unknown_customer_404(client):
     assert client.get("/api/customers/nobody").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Security hardening
+# --------------------------------------------------------------------------- #
+def test_forged_token_with_known_secret_rejected(client):
+    """A token signed with the old well-known secret must be rejected."""
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    def b64url(data):
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    secret = "change-me-in-production"  # the historically hardcoded key
+    header = b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    payload = b64url(
+        json.dumps({"sub": "admin", "exp": int(time.time()) + 3600}).encode()
+    )
+    msg = f"{header}.{payload}".encode()
+    sig = b64url(hmac.new(secret.encode(), msg, hashlib.sha256).digest())
+    forged = f"{header}.{payload}.{sig}"
+
+    r = client.get("/api/auth/me", headers={"Authorization": f"Bearer {forged}"})
+    assert r.status_code == 401
+
+
+def test_secret_key_is_not_hardcoded(client):
+    from config import settings
+
+    assert settings.secret_key not in ("", "change-me-in-production")
+    assert len(settings.secret_key) >= 32
+
+
+def test_cors_blocks_foreign_origins(client):
+    r = client.get("/api/health", headers={"Origin": "https://evil.example.com"})
+    assert r.headers.get("access-control-allow-origin") is None
+    r = client.get("/api/health", headers={"Origin": "http://localhost:8080"})
+    assert r.headers.get("access-control-allow-origin") == "http://localhost:8080"
+
+
+def test_login_rate_limited_after_failures(client):
+    from routers import auth as auth_router
+
+    for _ in range(5):
+        r = client.post(
+            "/api/auth/login", json={"username": "admin", "password": "wrong"}
+        )
+        assert r.status_code == 401
+    r = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "wrong"}
+    )
+    assert r.status_code == 429
+    auth_router._failed_attempts.clear()
+
+
+def test_disabled_user_token_invalid(client, admin_headers):
+    # Create a second admin whose token stays valid after the main user is
+    # disabled (safe user cannot re-enable itself).
+    r = client.post(
+        "/api/users",
+        json={"username": "backup_admin", "password": "backup-pass"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201, r.text
+    r = client.post(
+        "/api/auth/login", json={"username": "backup_admin", "password": "backup-pass"}
+    )
+    assert r.status_code == 200, r.text
+    backup_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    users = client.get("/api/users", headers=admin_headers).json()
+    admin_id = next(u["id"] for u in users if u["username"] == "admin")
+    assert client.get("/api/auth/me", headers=admin_headers).status_code == 200
+
+    client.put(f"/api/users/{admin_id}", json={"is_active": False}, headers=backup_headers)
+    # The disabled admin's token is now invalid.
+    assert client.get("/api/auth/me", headers=admin_headers).status_code == 401
+    # Re-enable via the second admin so later tests keep working.
+    client.put(f"/api/users/{admin_id}", json={"is_active": True}, headers=backup_headers)
+    assert client.get("/api/auth/me", headers=admin_headers).status_code == 200
+
+
+def test_upload_rejects_spoofed_image(client, admin_headers, products):
+    """Declared image/png but actual content is text -> rejected."""
+    pid = products[0]["id"]
+    r = client.post(
+        f"/api/products/{pid}/image",
+        headers=admin_headers,
+        files={"file": ("x.png", b"<script>alert(1)</script>", "image/png")},
+    )
+    assert r.status_code in (400, 422)
 
 
 # --------------------------------------------------------------------------- #

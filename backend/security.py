@@ -62,8 +62,6 @@ def get_current_user(
     user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise credentials_exception
+    if not user.is_active:
+        raise credentials_exception
     return user
-
-
-def require_admin(current_user: User = Depends(get_current_user)):
-    return current_user
