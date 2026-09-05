@@ -2,6 +2,31 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.6] - 2026-09-05
+
+### Changed
+- **Dependency updates (via Dependabot):**
+  - `fastapi` 0.115.6 -> 0.141.1 (`backend/requirements.txt`)
+  - `uvicorn[standard]` 0.34.0 -> 0.52.4 (`backend/requirements.txt`)
+  - `sqlalchemy` 2.0.36 -> 2.0.52 (`backend/requirements.txt`)
+  - `pydantic` 2.10.4 -> 2.13.5 (`backend/requirements.txt`)
+  - `pydantic-settings` 2.7.0 -> 2.15.0 (`backend/requirements.txt`)
+  - `bcrypt` 4.2.1 -> 5.0.0 (`backend/requirements.txt`)
+  - `python-jose[cryptography]` 3.4.0 -> 3.5.0 (`backend/requirements.txt`)
+  - `python-multipart` 0.0.31 -> 0.0.32 (`backend/requirements.txt`)
+  - `pytest` 9.0.3 -> 9.1.1 (`backend/requirements-dev.txt`)
+  - `httpx` 0.28.1 replaced by `httpx2` 2.12.0 (`backend/requirements-dev.txt`):
+    starlette 1.x's `TestClient` now uses `httpx2` instead of `httpx`.
+  - GitHub Actions: `actions/checkout` v4 -> v7, `actions/setup-python` v5 -> v7,
+    `actions/setup-node` v4 -> v7, `docker/setup-qemu-action` v3 -> v4,
+    `docker/metadata-action` v5 -> v6.
+- **Pydantic V2 cleanup**: `backend/schemas.py` migrated from the deprecated
+  class-based `Config` settings to `model_config = ConfigDict(...)`, removing the
+  deprecation warnings that appear with pydantic 2.13.
+
+All backend API tests and end-to-end browser tests pass with the updated
+dependencies.
+
 ## [1.0.5] - 2026-09-05
 
 ### Security hardening

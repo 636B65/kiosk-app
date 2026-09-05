@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class CategoryBase(BaseModel):
@@ -23,8 +23,7 @@ class CategoryUpdate(BaseModel):
 class CategoryOut(CategoryBase):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProductBase(BaseModel):
@@ -58,8 +57,7 @@ class ProductOut(ProductBase):
     image_url: Optional[str] = None
     category: Optional[CategoryOut] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrderItemIn(BaseModel):
@@ -80,8 +78,7 @@ class OrderItemOut(BaseModel):
     quantity: int
     unit_price: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrderOut(BaseModel):
@@ -94,8 +91,7 @@ class OrderOut(BaseModel):
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrderDetailOut(OrderOut):
@@ -107,8 +103,7 @@ class CustomerOut(BaseModel):
     username: str
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CustomerStats(BaseModel):
@@ -151,8 +146,7 @@ class UserOut(BaseModel):
     is_active: bool
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserCreate(BaseModel):
