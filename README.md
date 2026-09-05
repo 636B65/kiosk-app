@@ -13,6 +13,7 @@ Built to run fully **offline (air-gapped)** via Docker Compose.
 - Browse products by category with live search
 - Add/remove items in a cart with running totals
 - Checkout by entering a username (auto-creates the customer on first purchase)
+- Confetti celebration animation when an order is completed
 - Purchases are added to the customer's balance (paid later at the counter)
 - "User lookup" to view your balance, stats, and full monthly order history
 - All prices in **EUR** (admin can change the currency in Settings)

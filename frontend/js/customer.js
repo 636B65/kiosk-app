@@ -270,6 +270,7 @@ const Kiosk = {
     },
 
     renderConfirmation(order, history) {
+        confetti();
         Modal.open(`
             <h2>✅ Order Complete</h2>
             <p style="color:var(--muted);">Order #${order.id} for ${esc(order.customer_username)}</p>

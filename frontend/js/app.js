@@ -152,6 +152,67 @@ const esc = (s) =>
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
 
+function confetti({ particleCount = 180, duration = 3500 } = {}) {
+    const colors = ["#f59e0b", "#ef4444", "#3b82f6", "#10b981", "#8b5cf6", "#ec4899", "#facc15"];
+    const canvas = document.createElement("canvas");
+    canvas.className = "confetti-layer";
+    canvas.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:9999;";
+    document.body.appendChild(canvas);
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const particles = Array.from({ length: particleCount }, () => ({
+        x: Math.random() * width,
+        y: -20 - Math.random() * height * 0.4,
+        size: 6 + Math.random() * 7,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        vx: (Math.random() - 0.5) * 3,
+        vy: 2 + Math.random() * 4,
+        rot: Math.random() * Math.PI * 2,
+        vr: (Math.random() - 0.5) * 0.3,
+        round: Math.random() < 0.4,
+    }));
+
+    const started = performance.now();
+    const gravity = 0.08;
+    function frame(now) {
+        ctx.clearRect(0, 0, width, height);
+        const elapsed = now - started;
+        const fade = elapsed > duration - 600 ? Math.max(0, (duration - elapsed) / 600) : 1;
+        for (const p of particles) {
+            p.vy += gravity;
+            p.x += p.vx;
+            p.y += p.vy;
+            p.rot += p.vr;
+            ctx.save();
+            ctx.globalAlpha = fade;
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rot);
+            ctx.fillStyle = p.color;
+            if (p.round) {
+                ctx.beginPath();
+                ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+            }
+            ctx.restore();
+        }
+        if (elapsed < duration) {
+            requestAnimationFrame(frame);
+        } else {
+            canvas.remove();
+        }
+    }
+    requestAnimationFrame(frame);
+}
+
 function sortShopProducts(products) {
     return [...products].sort((a, b) => {
         const aSpec = a.is_weekly_special ? 0 : 1;

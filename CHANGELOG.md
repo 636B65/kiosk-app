@@ -2,6 +2,16 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.4] - 2026-09-05
+
+### Added
+- **Confetti on order completion**: the kiosk fires a confetti burst over the
+  order-confirmation modal when a customer completes a purchase. The effect is
+  a self-contained canvas animation (no external libraries, so the app remains
+  fully offline-capable).
+
+All backend API tests and end-to-end browser tests pass.
+
 ## [1.0.3] - 2026-09-05
 
 ### Added

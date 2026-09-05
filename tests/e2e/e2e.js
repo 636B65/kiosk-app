@@ -151,7 +151,11 @@ server.listen(PORT, async () => {
       if (!ord) throw new Error("no order number");
       const bal = text.match(/Balance to pay: (.+)/);
       if (!bal) throw new Error("no balance display");
-      return `order ${ord[1]} — ${bal[1].trim()}`;
+      const confettiCanvas = await page.evaluate(
+        () => !!document.querySelector("canvas.confetti-layer")
+      );
+      if (!confettiCanvas) throw new Error("no confetti on order complete");
+      return `order ${ord[1]} — ${bal[1].trim()} (confetti ✓)`;
     });
 
     await step("customer: new order resets", async () => {
