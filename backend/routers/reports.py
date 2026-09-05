@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Order, OrderItem, Product
 from security import get_current_user
+from timeutil import utcnow
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -35,7 +36,7 @@ def outstanding_total(db: Session) -> float:
 
 @router.get("/summary")
 def summary(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    now = datetime.utcnow()
+    now = utcnow()
     return {
         "today": revenue_for_period(db, start=now.replace(hour=0, minute=0, second=0)),
         "yesterday": revenue_for_period(
@@ -50,7 +51,7 @@ def summary(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
         "pending_orders": db.query(Order).filter(Order.status == "pending").count(),
         "low_stock_products": (
             db.query(Product)
-            .filter(Product.is_active == True, Product.stock <= 5)
+            .filter(Product.is_active, Product.stock <= 5)
             .all()
         ),
     }
@@ -91,7 +92,7 @@ def sales_by_day(
     _: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    start = datetime.utcnow() - timedelta(days=days)
+    start = utcnow() - timedelta(days=days)
     rows = (
         db.query(
             func.date(Order.created_at).label("day"),

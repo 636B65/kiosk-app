@@ -72,3 +72,75 @@ jobs:
           E2E_PYTHON: python
           CHROMIUM_PATH: /usr/bin/chromium
         run: npm test
+
+  integration-tls:
+    name: Docker + TLS smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Install Chromium (system)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends chromium-browser
+
+      - name: Build and start services (generates self-signed cert)
+        env:
+          ADMIN_PASSWORD: smoke-test-password
+        run: docker compose up -d --build
+
+      - name: Wait for backend + frontend over TLS
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost/api/health || true)
+            if [ "$code" = "200" ]; then echo "frontend TLS healthy"; exit 0; fi
+            sleep 3
+          done
+          echo "services never became healthy" >&2
+          docker compose ps
+          exit 1
+
+      - name: Validate nginx config and generated certificate
+        run: |
+          docker compose exec -T frontend nginx -t
+          test -f data/tls/server.crt && test -f data/tls/server.key || { echo "cert not generated"; exit 1; }
+          echo "self-signed certificate generated at data/tls/"
+
+      - name: Verify HTTP 80 -> HTTPS 443 redirect
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
+          loc=$(curl -s -I http://localhost/ | grep -i '^location:' | tr -d '\r')
+          test "$code" = "301" || { echo "expected 301, got $code"; exit 1; }
+          echo "port 80 redirects with $code -> $loc"
+
+      - name: Verify certificate is not overwritten on restart
+        run: |
+          cp data/tls/server.crt /tmp/server.crt.before
+          cp data/tls/server.key /tmp/server.key.before
+          docker compose restart frontend
+          sleep 4
+          cmp -s /tmp/server.crt.before data/tls/server.crt || { echo "cert WAS overwritten"; exit 1; }
+          cmp -s /tmp/server.key.before data/tls/server.key || { echo "key WAS overwritten"; exit 1; }
+          echo "existing certificate untouched after restart"
+
+      - name: HTTPS browser smoke (CSP + rendering + admin login)
+        working-directory: tests/e2e
+        env:
+          CHROMIUM_PATH: /usr/bin/chromium
+          ADMIN_PASSWORD: smoke-test-password
+        run: node https-smoke.js
+
+      - name: Tear down
+        if: always()
+        run: docker compose down

@@ -76,7 +76,7 @@ def list_products(
     if search:
         query = query.filter(Product.name.ilike(f"%{search}%"))
     if active_only:
-        query = query.filter(Product.is_active == True)
+        query = query.filter(Product.is_active)
     return query.order_by(Product.name).all()
 
 

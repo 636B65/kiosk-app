@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
@@ -14,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from timeutil import utcnow
 
 
 class User(Base):
@@ -24,7 +24,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     full_name = Column(String, default="")
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class Category(Base):
@@ -51,7 +51,7 @@ class Product(Base):
     image_path = Column(String, default="")
     is_active = Column(Boolean, default=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     category = relationship("Category", back_populates="products")
     order_items = relationship("OrderItem", back_populates="product")
@@ -74,7 +74,7 @@ class Customer(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     orders = relationship("Order", back_populates="customer")
 
@@ -88,7 +88,7 @@ class Order(Base):
     total = Column(Float, default=0.0)
     notes = Column(Text, default="")
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     completed_at = Column(DateTime, nullable=True)
 
     customer = relationship("Customer", back_populates="orders")

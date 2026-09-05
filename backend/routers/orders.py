@@ -1,13 +1,13 @@
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Customer, Order, OrderItem, Product
 from schemas import OrderCreate, OrderItemOut, OrderOut
 from security import get_current_user
+from timeutil import utcnow
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -112,7 +112,7 @@ def update_order_status(
 
     order.status = new_status
     if new_status != "pending":
-        order.completed_at = datetime.utcnow()
+        order.completed_at = utcnow()
     db.commit()
     db.refresh(order)
     return order

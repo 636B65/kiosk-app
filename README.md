@@ -171,6 +171,8 @@ requests (see `.github/workflows/ci.yml`). Run them locally:
 cd backend
 pip install -r requirements-dev.txt
 pytest tests -v
+ruff check .
+mypy
 ```
 
 **End-to-end tests** (Playwright against a live backend + nginx-proxied
@@ -181,6 +183,14 @@ cd tests/e2e
 npm install
 # requires a Python 3.12 interpreter with backend deps installed
 E2E_PYTHON=python CHROMIUM_PATH=/usr/bin/chromium npm test
+```
+
+**Docker + TLS smoke test** (the full delivered stack, incl. the self-signed
+certificate, HTTP->HTTPS redirect, CSP header, and admin login over TLS):
+
+```bash
+docker compose up -d --build
+cd tests/e2e && CHROMIUM_PATH=/usr/bin/chromium ADMIN_PASSWORD=smoke-test-password node https-smoke.js
 ```
 
 The e2e harness spawns its own backend and a static/proxy server, then drives

@@ -2,6 +2,41 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.8] - 2026-09-05
+
+### Changed
+- **Replaced `python-jose` with `PyJWT`** (`backend/requirements.txt`): the
+  jose library is effectively unmaintained upstream. Token creation and
+  verification in `backend/security.py` now use `pyjwt==2.13.0`, and JWT
+  `sub` claims are validated to be strings (a forged token with a non-string
+  `sub` is rejected) — a genuine hardening caught by type checking.
+- **Removed `datetime.utcnow()` deprecations**: new `backend/timeutil.py`
+  provides `utcnow()` (UTC time as a naive datetime, matching how SQLite
+  stores timestamps) and replaces the deprecated `datetime.utcnow()` in
+  `models.py`, `security.py`, and the orders/customers/reports routers.
+- **Linting + type checking added** (`backend/requirements-dev.txt`):
+  - `ruff` configuration in `backend/pyproject.toml`; fixed findings
+    (unused imports, `== True` comparisons, missing trailing newlines).
+  - `mypy` configuration covering the pure-logic modules (`config`,
+    `timeutil`, `schemas`, `security`, `seed`). Both run in CI.
+  - Note: the SQLAlchemy models/routers use the classic 1.x `Column`/`Query`
+    style which mypy cannot type-check cleanly; they are excluded pending a
+    SQLAlchemy 2.0 `Mapped` migration (see `pyproject.toml`).
+- **CSP hardening** (`frontend/nginx.conf`): `script-src` is now `'self'`
+  with **no** `unsafe-inline`/`unsafe-eval` — inline script execution (the
+  main XSS sink) is disabled. The frontend uses only external scripts.
+  `style-src 'unsafe-inline'` is kept for now because the UI sets ~45 inline
+  styles from JS templates; moving them to CSS classes is a follow-up.
+  Inline bars for the confetti canvas were converted to CSSOM property
+  assignments (`frontend/js/app.js`).
+- **CI: Docker + TLS smoke test** (`.github/workflows/ci.yml`): builds and
+  starts the real compose stack, verifies `nginx -t`, the self-signed cert is
+  generated under `data/tls/`, HTTP 80 -> 301 -> HTTPS 443, the certificate is
+  **not overwritten** on restart, and a new `tests/e2e/https-smoke.js` drives
+  Chromium over HTTPS (CSP header, kiosk rendering, admin login).
+
+All backend API tests and end-to-end browser tests pass.
+
 ## [1.0.7] - 2026-09-05
 
 ### Changed

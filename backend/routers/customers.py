@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +8,7 @@ from database import get_db
 from models import Customer, Order, OrderItem
 from schemas import CustomerHistoryOut, CustomerOut, CustomerStats, CustomerWithBalance
 from security import get_current_user
+from timeutil import utcnow
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -135,7 +135,7 @@ def reset_payment(
     )
     for order in orders:
         order.status = "paid"
-        order.completed_at = datetime.utcnow()
+        order.completed_at = utcnow()
     db.commit()
     return {
         "username": customer.username,

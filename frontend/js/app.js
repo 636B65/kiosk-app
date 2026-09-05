@@ -156,7 +156,12 @@ function confetti({ particleCount = 180, duration = 3500 } = {}) {
     const colors = ["#f59e0b", "#ef4444", "#3b82f6", "#10b981", "#8b5cf6", "#ec4899", "#facc15"];
     const canvas = document.createElement("canvas");
     canvas.className = "confetti-layer";
-    canvas.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:9999;";
+    canvas.style.position = "fixed";
+    canvas.style.inset = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "9999";
     document.body.appendChild(canvas);
 
     const dpr = window.devicePixelRatio || 1;
