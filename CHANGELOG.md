@@ -2,6 +2,43 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.5] - 2026-09-05
+
+### Security hardening
+
+- **JWT signing key**: the app previously shipped with a hardcoded
+  `SECRET_KEY` (`change-me-in-production`) that allowed anyone to forge valid
+  admin tokens. `SECRET_KEY` is now read from the environment, and when unset a
+  random key is generated at startup (existing sessions are then invalidated on
+  restart). `docker-compose.yml` passes it through from the host environment,
+  and empty values are rejected.
+- **Default admin credentials removed**: the seed no longer creates the admin
+  with the well-known `admin`/`admin123` password. The initial password is taken
+  from `ADMIN_PASSWORD`, or a strong random password is generated and printed in
+  the backend logs on first boot.
+- **Deactivated users**: existing JTWs for a user who is later deactivated are
+  now rejected immediately (previously the token stayed valid until expiry).
+- **CORS**: the API no longer allows `allow_origins=["*"]` together with
+  credentials; it is restricted to the kiosk origin (`http://localhost:8080`,
+  configurable via `CORS_ORIGINS`).
+- **Login rate limiting**: login endpoints now lock out a client IP after 5
+  failed attempts for 15 minutes (HTTP 429 with `Retry-After`).
+- **Image upload validation**: uploaded product images are verified against
+  their file-signature magic bytes in addition to the declared `Content-Type`;
+  disguised files (e.g. HTML/scripts sent as `image/png`) are rejected.
+- **Security headers**: nginx now sends `Content-Security-Policy`,
+  `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, and
+  `Permissions-Policy`.
+
+### Changed
+- `backend/config.py`, `backend/seed.py`, `backend/security.py`,
+  `backend/main.py`, `backend/routers/auth.py`, `backend/routers/products.py`,
+  `docker-compose.yml`, `frontend/nginx.conf`.
+- Tests updated (backend and e2e) to use the new admin bootstrap; new regression
+  tests added for the security controls.
+
+All backend API tests and end-to-end browser tests pass.
+
 ## [1.0.4] - 2026-09-05
 
 ### Added
