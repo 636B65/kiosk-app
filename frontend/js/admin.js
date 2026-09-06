@@ -219,7 +219,7 @@ const Admin = {
             <div class="admin-main">
                 <h2>Products</h2>
                 <div class="toolbar">
-                    <button class="btn btn-primary" onclick="Admin.openProductModal()">+ New Product</button>
+                    <button class="btn btn-primary" data-action="admin-new-product">+ New Product</button>
                 </div>
                 <div class="panel">
                 <table>
@@ -311,7 +311,7 @@ const Admin = {
                     </label>
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
@@ -364,7 +364,7 @@ const Admin = {
             <h2>Delete Product</h2>
             <p>Delete <strong>${esc(product?.name)}</strong>? This cannot be undone.</p>
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
                 <button class="btn btn-danger" id="confirm-delete">Delete</button>
             </div>
         `);
@@ -392,7 +392,7 @@ const Admin = {
             <div class="admin-main">
                 <h2>Categories</h2>
                 <div class="toolbar">
-                    <button class="btn btn-primary" onclick="Admin.openCategoryModal()">+ New Category</button>
+                    <button class="btn btn-primary" data-action="admin-new-category">+ New Category</button>
                 </div>
                 <div class="panel">
                 <table>
@@ -436,7 +436,7 @@ const Admin = {
                     <input id="c-sort" type="number" value="${category?.sort_order ?? 0}">
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
@@ -472,7 +472,7 @@ const Admin = {
             <h2>Delete Category</h2>
             <p>Delete <strong>${esc(category.name)}</strong>?${productCount > 0 ? ` ${productCount} product(s) will be uncategorized.` : ""}</p>
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
                 <button class="btn btn-danger" id="confirm-delete">Delete</button>
             </div>
         `);
@@ -562,7 +562,7 @@ const Admin = {
                     </tbody>
                 </table>
                 <div class="form-actions">
-                    <button class="btn btn-secondary" onclick="Modal.close()">Close</button>
+                    <button class="btn btn-secondary" data-action="modal-close">Close</button>
                 </div>
             `);
         } catch (err) {
@@ -663,7 +663,7 @@ const Admin = {
                     ${data.balance > 0 ? `
                         <button class="btn btn-success" id="reset-from-modal" data-username="${encodeURIComponent(data.customer.username)}">Reset payment</button>
                     ` : ""}
-                    <button class="btn btn-secondary" onclick="Modal.close()">Close</button>
+                    <button class="btn btn-secondary" data-action="modal-close">Close</button>
                 </div>
             `);
             const reset = document.getElementById("reset-from-modal");
@@ -682,7 +682,7 @@ const Admin = {
             <h2>Reset payment</h2>
             <p>Mark all unpaid orders for <strong>${esc(username)}</strong> as paid?</p>
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
                 <button class="btn btn-success" id="confirm-reset">Reset payment</button>
             </div>
         `);
@@ -766,7 +766,7 @@ const Admin = {
             <div class="admin-main">
                 <h2>Users</h2>
                 <div class="toolbar">
-                    <button class="btn btn-primary" onclick="Admin.openUserModal()">+ New User</button>
+                    <button class="btn btn-primary" data-action="admin-new-user">+ New User</button>
                 </div>
                 <div class="panel">
                 <table>
@@ -816,7 +816,7 @@ const Admin = {
                     </label>
                 </div>` : ""}
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
@@ -863,7 +863,7 @@ const Admin = {
             <h2>Delete User</h2>
             <p>Delete this user? This cannot be undone.</p>
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
                 <button class="btn btn-danger" id="confirm-delete">Delete</button>
             </div>
         `);
@@ -911,7 +911,7 @@ const Admin = {
                             🐞 Debug mode (show load times &amp; verbose info on every site)
                         </label>
                     </div>
-                    <button class="btn btn-primary" onclick="Admin.saveSettings()">Save Settings</button>
+                    <button class="btn btn-primary" data-action="admin-save-settings">Save Settings</button>
                 </div>
             </div>
         `;

@@ -95,7 +95,7 @@ const Debug = {
             this.buildPanel();
             this.tick();
             this.tickTimer = setInterval(() => this.tick(), 1500);
-            this.open = true;
+            this.open = false;
             this.render();
         } else {
             this.teardown();

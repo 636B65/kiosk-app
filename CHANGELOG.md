@@ -2,6 +2,31 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.10] - 2026-09-06
+
+### Changed
+- **Strict CSP restored without breaking the UI** (fixes the 1.0.9 trade-off).
+  In 1.0.9 the Content-Security-Policy in `frontend/nginx.conf` was relaxed to
+  `script-src 'self' 'unsafe-inline'` because the frontend used inline
+  `onclick`/`oninput` attributes, which the earlier strict `script-src 'self'`
+  policy (introduced in 1.0.8) silently blocked — making every Settings save and
+  kiosk/Admin button appear dead.
+  - The UI no longer uses inline event handlers at all. A new
+    `frontend/js/handlers.js` module registers the handlers behind external,
+    delegated data-attributes (`data-action` for clicks, `data-action-input` for
+    typing) and dispatches them to the relevant object (`Modal`, `Kiosk`,
+    `Admin`). All inline `onclick`/`oninput` handlers in `admin.js` and
+    `customer.js` were converted.
+  - `frontend/nginx.conf` now serves the original strict policy again
+    (`script-src 'self'` with **no** `unsafe-inline`), keeping the XSS hardening
+    while the app remains fully operable. The debug panel also starts collapsed
+    (FAB only) so it never overlaps the kiosk checkout.
+  - `tests/e2e/https-smoke.js` keeps its strict-CSP assertion (no
+    `unsafe-inline`), which now passes legitimately. The Docker + TLS smoke test
+    and the full e2e suite pass with the strict policy.
+
+All backend API tests and end-to-end browser tests pass.
+
 ## [1.0.9] - 2026-09-06
 
 ### Added

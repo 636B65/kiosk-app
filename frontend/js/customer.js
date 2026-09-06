@@ -232,7 +232,7 @@ const Kiosk = {
                     <input id="co-username" autocomplete="off" required>
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
                     <button type="submit" class="btn btn-primary">Buy</button>
                 </div>
             </form>
@@ -280,7 +280,7 @@ const Kiosk = {
             ` : ""}
             <p style="color:var(--muted);">${esc(Store.settings.receipt_footer || "Thank you for your purchase!")}</p>
             <div class="form-actions">
-                <button class="btn btn-primary" onclick="Modal.close(); Kiosk.newOrder()">New Order</button>
+                <button class="btn btn-primary" data-action="kiosk-new-order">New Order</button>
             </div>
         `);
     },
@@ -295,7 +295,7 @@ const Kiosk = {
                     <input id="lk-username" autocomplete="off" required>
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
                     <button type="submit" class="btn btn-primary">Look up</button>
                 </div>
             </form>
@@ -362,8 +362,8 @@ const Kiosk = {
                     </div>
                 `).join("")}
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="Modal.close()">Close</button>
-                <button class="btn btn-primary" onclick="Kiosk.openLookup()">Another user</button>
+                <button class="btn btn-secondary" data-action="modal-close">Close</button>
+                <button class="btn btn-primary" data-action="kiosk-open-lookup">Another user</button>
             </div>
         `);
     },
@@ -381,7 +381,7 @@ const Kiosk = {
             <div class="search-bar">
                 <input id="search-input" placeholder="Search products..."
                        autocomplete="off" spellcheck="false"
-                       oninput="Kiosk.renderProductGrid()">
+                       data-action-input="kiosk-search">
             </div>
             <div id="product-grid-container"></div>
         `;

@@ -27,6 +27,7 @@ async function handleRoute() {
 document.addEventListener("DOMContentLoaded", () => {
     Kiosk.init();
     Admin.init();
+    Actions.init();
     Debug.init();
     handleRoute();
     window.addEventListener("hashchange", () => handleRoute());
