@@ -8,25 +8,28 @@ function parseRoute() {
     return { page: "customer" };
 }
 
-function handleRoute() {
+async function handleRoute() {
     const route = parseRoute();
+    const t0 = performance.now();
     if (route.page !== currentRoute) {
         Modal.close();
     }
     currentRoute = route.page;
     if (route.page === "admin") {
         Admin.view = route.view;
-        Admin.render();
+        await Admin.render();
     } else {
-        Kiosk.render();
+        await Kiosk.render();
     }
+    Debug.recordRoute(route.page + (route.view ? "/" + route.view : ""), performance.now() - t0);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     Kiosk.init();
     Admin.init();
+    Debug.init();
     handleRoute();
-    window.addEventListener("hashchange", handleRoute);
+    window.addEventListener("hashchange", () => handleRoute());
 });
 
 const Store = {

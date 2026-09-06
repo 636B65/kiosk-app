@@ -2,6 +2,38 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.9] - 2026-09-06
+
+### Added
+- **Admin-toggleable Debug / verbose mode** (`frontend/js/debug.js`): admins can
+  enable 🐞 Debug mode in **Settings**, which is persisted as a
+  `debug_mode` setting and applies to every screen (customer kiosk and admin).
+  When enabled, a collapsible floating panel shows:
+  - page load times: `DOMContentLoaded`, `Load`, First Contentful Paint;
+  - per-route render times for the current SPA page;
+  - a live log of every API request (time, method, path, status, duration)
+    with slow/failed calls highlighted;
+  - JS heap memory usage and DOM node count;
+  - network statistics (resource count, transferred bytes, images loaded).
+  - The flag is read once at startup and re-polled every 15 s so all connected
+    kiosk screens pick up a change without a reload. Only admins can toggle it
+    (`PUT /api/settings/debug_mode` requires an authenticated session); the
+    value itself is served with the public settings payload. Route rendering in
+    `frontend/js/app.js` is measured via `debug.js`.
+
+### Fixed
+- **CSP regression that disabled the admin and kiosk UI** (`frontend/nginx.conf`):
+  1.0.8 shipped `Content-Security-Policy` with `script-src 'self'` and **no**
+  `unsafe-inline`, which blocked the frontend's inline `onclick`/`oninput`
+  handlers. After a rebuild every inline-driven action silently stopped working:
+  admin Settings could not be saved (store name, currency, debug toggle), and
+  kiosk buttons such as "New Order" and modal "Cancel" after a user lookup did
+  nothing. `script-src` now includes `'unsafe-inline'` (the rest of the policy
+  is unchanged), restoring all inline event handlers. Verified end-to-end in a
+  browser against the real backend (no CSP violations).
+
+All backend API tests and end-to-end browser tests pass.
+
 ## [1.0.8] - 2026-09-05
 
 ### Changed

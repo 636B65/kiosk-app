@@ -905,6 +905,12 @@ const Admin = {
                             `).join("")}
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label style="display:flex; align-items:center; gap:0.5rem;">
+                            <input type="checkbox" id="s-debug_mode" ${Debug.isOn(settings) ? "checked" : ""}>
+                            🐞 Debug mode (show load times &amp; verbose info on every site)
+                        </label>
+                    </div>
                     <button class="btn btn-primary" onclick="Admin.saveSettings()">Save Settings</button>
                 </div>
             </div>
@@ -916,12 +922,14 @@ const Admin = {
             store_name: document.getElementById("s-store_name").value.trim(),
             receipt_footer: document.getElementById("s-receipt_footer").value,
             currency: document.getElementById("s-currency").value,
+            debug_mode: document.getElementById("s-debug_mode").checked ? "true" : "false",
         };
         try {
             for (const [key, value] of Object.entries(fields)) {
                 await API.put(`/settings/${key}`, { key, value: String(value) });
             }
             Store.settings = { ...Store.settings, ...fields };
+            Debug.syncSetting();
             Toast.success("Settings saved");
             this.renderSettings();
         } catch (err) {

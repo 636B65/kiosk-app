@@ -829,3 +829,174 @@ tr:hover td {
     .admin-sidebar { width: 100%; height: auto; position: static; }
     .admin-main { padding: 1rem; }
 }
+
+/* ---------- Debug panel ---------- */
+
+.debug-fab {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 600;
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    border: none;
+    background: #0f172a;
+    color: #fff;
+    font-size: 1.1rem;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+}
+
+.debug-fab:hover {
+    background: var(--primary);
+}
+
+.debug-panel {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 600;
+    width: 460px;
+    max-width: calc(100vw - 2rem);
+    max-height: 70vh;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    display: none;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.debug-panel.debug-open {
+    display: flex;
+}
+
+.debug-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    background: var(--primary);
+    color: #fff;
+    font-weight: 700;
+}
+
+.debug-head button {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: #fff;
+    border-radius: 6px;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.debug-head button:hover {
+    background: rgba(255,255,255,0.35);
+}
+
+.debug-badge {
+    background: #16a34a;
+    color: #fff;
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+#debug-close {
+    margin-left: auto;
+}
+
+#debug-body {
+    padding: 0.7rem 0.8rem;
+    overflow-y: auto;
+}
+
+.debug-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.4rem;
+}
+
+.debug-cell {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0.4rem 0.55rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.debug-cell span {
+    color: #94a3b8;
+    text-transform: uppercase;
+    font-size: 0.6rem;
+    letter-spacing: 0.03em;
+}
+
+.debug-cell strong {
+    font-size: 0.85rem;
+}
+
+.debug-cell small {
+    color: #94a3b8;
+}
+
+.debug-section {
+    margin: 0.7rem 0 0.3rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    font-size: 0.6rem;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 0.2rem;
+}
+
+.debug-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: inherit;
+}
+
+.debug-table th, .debug-table td {
+    padding: 0.2rem 0.35rem;
+    border-bottom: 1px solid #1e293b;
+    text-align: left;
+    font-size: 0.72rem;
+}
+
+.debug-table th {
+    color: #94a3b8;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+}
+
+.debug-table tr:hover td {
+    background: #1e293b;
+}
+
+.debug-path {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.debug-num {
+    text-align: right;
+}
+
+.debug-dim {
+    color: #64748b;
+}
+
+.debug-ok { color: #4ade80; }
+.debug-bad { color: #f87171; }
+.debug-slow td { background: rgba(220,38,38,0.18); }
+.debug-warn td { background: rgba(217,119,6,0.15); }
