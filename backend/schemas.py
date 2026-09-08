@@ -1,7 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+MIN_PASSWORD_LENGTH = 8
+MAX_ORDER_QUANTITY = 1000
+MAX_ORDER_ITEMS = 50
+MAX_NOTES_LENGTH = 500
 
 
 class CategoryBase(BaseModel):
@@ -64,11 +69,36 @@ class OrderItemIn(BaseModel):
     product_id: int
     quantity: int = 1
 
+    @field_validator("quantity")
+    @classmethod
+    def _validate_quantity(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("quantity must be at least 1")
+        if v > MAX_ORDER_QUANTITY:
+            raise ValueError(f"quantity must not exceed {MAX_ORDER_QUANTITY}")
+        return v
+
 
 class OrderCreate(BaseModel):
     customer_username: str
     items: List[OrderItemIn]
     notes: str = ""
+
+    @field_validator("items")
+    @classmethod
+    def _validate_items(cls, v: List[OrderItemIn]) -> List[OrderItemIn]:
+        if not v:
+            raise ValueError("order must contain at least one item")
+        if len(v) > MAX_ORDER_ITEMS:
+            raise ValueError(f"order must contain at most {MAX_ORDER_ITEMS} items")
+        return v
+
+    @field_validator("notes")
+    @classmethod
+    def _validate_notes(cls, v: str) -> str:
+        if len(v) > MAX_NOTES_LENGTH:
+            raise ValueError(f"notes must not exceed {MAX_NOTES_LENGTH} characters")
+        return v
 
 
 class OrderItemOut(BaseModel):
@@ -154,11 +184,29 @@ class UserCreate(BaseModel):
     password: str
     full_name: str = ""
 
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, v: str) -> str:
+        if len(v) < MIN_PASSWORD_LENGTH:
+            raise ValueError(
+                f"password must be at least {MIN_PASSWORD_LENGTH} characters"
+            )
+        return v
+
 
 class UserUpdate(BaseModel):
     password: Optional[str] = None
     full_name: Optional[str] = None
     is_active: Optional[bool] = None
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password_update(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) < MIN_PASSWORD_LENGTH:
+            raise ValueError(
+                f"password must be at least {MIN_PASSWORD_LENGTH} characters"
+            )
+        return v
 
 
 class LoginRequest(BaseModel):

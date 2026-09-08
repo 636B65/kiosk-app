@@ -2,6 +2,46 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.11] - 2026-09-08
+
+### Security (pen-test follow-up)
+- **Critical: order quantity abuse fixed** (`backend/routers/orders.py`,
+  `backend/schemas.py`). `POST /api/orders` is unauthenticated (kiosk checkout)
+  and accepted **negative or zero** quantities — the stock check only rejected
+  quantities exceeding available stock. A customer could submit `quantity: -50`
+  to drive line totals negative (wiping their own or anyone's balance) and to
+  **inflate product stock** (`stock -= -50`). Quantities are now validated at
+  the schema layer: must be `>= 1` and `<= 1000`, and an order is capped at 50
+  line items with notes limited to 500 chars.
+- **High: backend port no longer exposed on the host network**
+  (`docker-compose.yml`). The backend was published as `8000:8000`, i.e.
+  reachable from any LAN machine, bypassing nginx's security headers (CSP/HSTS)
+  and letting attackers hammer admin login / API without the reverse proxy.
+  It now binds to `127.0.0.1:8000:8000` (loopback only); the frontend still
+  proxies `/api/` to it over Docker's internal network.
+- **Medium: login rate limiter no longer trusts a spoofed `X-Forwarded-For`**
+  (`backend/routers/auth.py`). The limiter keyed on the *first* header hop,
+  which the client controls, so an attacker could reset the lockout by changing
+  the header. It now keys on the **last** hop — the real client IP that nginx
+  appends via `$proxy_add_x_forwarded_for` — making the 5-attempt/15-minute
+  lockout effective.
+- **Medium: minimum password length enforced** (`backend/schemas.py`,
+  `backend/seed.py`). Admin-created users and password changes now require >= 8
+  characters (422 otherwise). The initial `admin` bootstrap rejects a too-short
+  `ADMIN_PASSWORD` (< 8 chars) and falls back to a generated random password
+  instead of silently using a weak one.
+- **Defense**: nginx `client_max_body_size 6m` set on the HTTPS server
+  (`frontend/nginx.conf`) so oversized request bodies (a memory/disk exhaust
+  vector via the public proxy) are rejected at the edge.
+
+### Tests
+- New backend regression tests: spoofed `X-Forwarded-For` does not defeat the
+  rate limiter; negative/zero/oversized quantities are rejected without side
+  effects (stock intact, no phantom customer); oversized order item lists are
+  rejected; short passwords are rejected on create and update.
+
+All backend API tests, ruff, and mypy pass.
+
 ## [1.0.10] - 2026-09-06
 
 ### Changed

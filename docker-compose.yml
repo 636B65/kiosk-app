@@ -4,7 +4,12 @@ services:
     image: kiosk/backend
     container_name: kiosk-backend
     ports:
-      - "8000:8000"
+      # Bind to host loopback only. The backend must NOT be reachable from the
+      # LAN/WAN: it is proxied to the frontend over Docker's internal network
+      # (http://backend:8000) and only exposed on localhost so operators can
+      # reach /api/health etc. from the host. Remove the port mapping entirely
+      # if you never need host access.
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
     environment:

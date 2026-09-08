@@ -166,6 +166,76 @@ def test_login_rate_limited_after_failures(client):
     auth_router._failed_attempts.clear()
 
 
+def test_rate_limiter_ignores_spoofed_xff(client):
+    """The limiter keys on the last X-Forwarded-For hop (set by nginx), so a
+    spoofed leading value must not reset the counter."""
+    from routers import auth as auth_router
+
+    auth_router._failed_attempts.clear()
+    # 5 failures from a fixed real IP (appended last) -> lockout, even though
+    # the client spoofs a different leading hop each time.
+    for _ in range(5):
+        r = client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "nope"},
+            headers={"X-Forwarded-For": "1.2.3.4, 203.0.113.9"},
+        )
+        assert r.status_code == 401
+    r = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "nope"},
+        headers={"X-Forwarded-For": "5.6.7.8, 203.0.113.9"},
+    )
+    assert r.status_code == 429
+    auth_router._failed_attempts.clear()
+
+
+def test_password_too_short_rejected(client, admin_headers):
+    r = client.post(
+        "/api/users",
+        json={"username": "shortpass", "password": "short"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+    # updating a password that is too short is also rejected
+    users = client.get("/api/users", headers=admin_headers).json()
+    target = next(u for u in users if u["username"] == "admin")
+    r = client.put(
+        f"/api/users/{target['id']}",
+        json={"password": "short"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 422
+
+
+def test_order_rejects_negative_and_zero_quantity(client, products):
+    pid = products[0]["id"]
+    stock_before = client.get(f"/api/products/{pid}").json()["stock"]
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "abuser", "items": [{"product_id": pid, "quantity": -50}]},
+    )
+    assert r.status_code == 422
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "abuser", "items": [{"product_id": pid, "quantity": 0}]},
+    )
+    assert r.status_code == 422
+    # stock unchanged and no negative-balance customer was created
+    assert client.get(f"/api/products/{pid}").json()["stock"] == stock_before
+    assert client.get("/api/customers/abuser").status_code == 404
+
+
+def test_order_rejects_excess_quantity_items(client, products):
+    pid = products[0]["id"]
+    items = [{"product_id": pid, "quantity": 1} for _ in range(60)]
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "bigcart", "items": items},
+    )
+    assert r.status_code == 422
+
+
 def test_disabled_user_token_invalid(client, admin_headers):
     # Create a second admin whose token stays valid after the main user is
     # disabled (safe user cannot re-enable itself).

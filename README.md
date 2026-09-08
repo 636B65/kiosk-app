@@ -55,8 +55,9 @@ docker compose up --build
   first start; if unset a strong random password is generated and printed in
   the backend logs on first boot. **No hardcoded default credentials are used.**
 
-The backend runs on http://localhost:8000 (internal only) and the frontend
-nginx proxies `/api/` requests to it over Docker's network.
+The backend runs on http://localhost:8000 (bound to host loopback only; it is
+**not** reachable from the LAN/WAN) and the frontend nginx proxies `/api/`
+requests to it over Docker's internal network.
 
 ### Configuration
 

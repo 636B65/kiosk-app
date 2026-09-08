@@ -14,16 +14,22 @@ def _initial_admin_password() -> str:
     a strong random password is generated and logged so the operator can
     retrieve it on first boot.
     """
-    password = os.environ.get("ADMIN_PASSWORD")
-    if password:
-        return password
-    generated = secrets.token_urlsafe(18)
-    print(
-        "[seed] No ADMIN_PASSWORD set - generated a random password for the "
-        f"'admin' account (save it now): {generated}",
-        flush=True,
-    )
-    return generated
+    password = os.environ.get("ADMIN_PASSWORD") or ""
+    if len(password) < 8:
+        generated = secrets.token_urlsafe(18)
+        if password:
+            print(
+                "[seed] ADMIN_PASSWORD is too short (< 8 chars) - ignoring it and "
+                "generating a random password for the 'admin' account instead.",
+                flush=True,
+            )
+        print(
+            "[seed] No usable ADMIN_PASSWORD set - generated a random password for "
+            f"the 'admin' account (save it now): {generated}",
+            flush=True,
+        )
+        return generated
+    return password
 
 
 def seed(db: Session):

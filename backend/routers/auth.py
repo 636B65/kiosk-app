@@ -31,7 +31,13 @@ _failed_attempts: dict[str, list[float]] = {}
 def _client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        # nginx appends the real client IP as the LAST entry
+        # ($proxy_add_x_forwarded_for). Trust that entry and ignore any
+        # client-supplied leading values, so the limiter cannot be bypassed
+        # by spoofing the header.
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
