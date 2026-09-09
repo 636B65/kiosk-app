@@ -61,6 +61,11 @@ jobs:
 
       - name: Install Chromium (system)
         run: |
+          # GitHub CI images pre-configure the Google Chrome apt repo, which is
+          # flaky (intermittent hash mismatches) and not used here — the e2e
+          # harness targets Ubuntu's chromium-browser. Drop it so
+          # `apt-get update` can't fail on it.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends chromium-browser
 
@@ -92,6 +97,11 @@ jobs:
 
       - name: Install Chromium (system)
         run: |
+          # GitHub CI images pre-configure the Google Chrome apt repo, which is
+          # flaky (intermittent hash mismatches) and not used here — the e2e
+          # harness targets Ubuntu's chromium-browser. Drop it so
+          # `apt-get update` can't fail on it.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends chromium-browser
 
