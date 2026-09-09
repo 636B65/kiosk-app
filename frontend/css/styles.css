@@ -435,6 +435,50 @@ input:focus, select:focus, textarea:focus {
     font-size: 0.9rem;
 }
 
+.lookup-input-wrap {
+    position: relative;
+}
+
+.lookup-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    margin-top: 4px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    overflow: hidden;
+    display: none;
+}
+
+.lookup-suggestions.open {
+    display: block;
+}
+
+.lookup-suggestion {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    border: none;
+    background: #fff;
+    font-size: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.lookup-suggestion:last-child {
+    border-bottom: none;
+}
+
+.lookup-suggestion:hover,
+.lookup-suggestion:focus {
+    background: #eff6ff;
+    color: var(--primary-dark);
+}
+
 .form-actions {
     display: flex;
     justify-content: flex-end;

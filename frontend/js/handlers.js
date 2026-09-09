@@ -32,4 +32,6 @@ Actions.register("kiosk-new-order", () => {
     Kiosk.newOrder();
 });
 Actions.register("kiosk-open-lookup", () => Kiosk.openLookup());
+Actions.register("kiosk-lookup-suggest", (el) => Kiosk.suggestLookup(el));
+Actions.register("kiosk-lookup-pick", (el) => Kiosk.pickLookup(el.dataset.username));
 Actions.register("kiosk-search", () => Kiosk.renderProductGrid());

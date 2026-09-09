@@ -280,6 +280,7 @@ const Kiosk = {
             ` : ""}
             <p style="color:var(--muted);">${esc(Store.settings.receipt_footer || "Thank you for your purchase!")}</p>
             <div class="form-actions">
+                <button class="btn btn-secondary" data-action="kiosk-open-lookup">Look up user</button>
                 <button class="btn btn-primary" data-action="kiosk-new-order">New Order</button>
             </div>
         `);
@@ -288,11 +289,15 @@ const Kiosk = {
     openLookup() {
         Modal.open(`
             <h2>Payment lookup</h2>
-            <p style="color:var(--muted);">Enter your username to see your balance and history.</p>
+            <p style="color:var(--muted);">Start typing to see matching usernames.</p>
             <form id="lookup-form">
                 <div class="form-group">
                     <label>Username</label>
-                    <input id="lk-username" autocomplete="off" required>
+                    <div class="lookup-input-wrap">
+                        <input id="lk-username" autocomplete="off" required
+                               data-action-input="kiosk-lookup-suggest">
+                        <div id="lk-suggestions" class="lookup-suggestions"></div>
+                    </div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
@@ -302,8 +307,60 @@ const Kiosk = {
         `);
         document.getElementById("lookup-form").addEventListener("submit", (e) => {
             e.preventDefault();
+            this.clearSuggestions();
             this.lookupUser(document.getElementById("lk-username").value);
         });
+    },
+
+    suggestTimer: null,
+
+    async suggestLookup(inputEl) {
+        const value = inputEl.value.trim();
+        const box = document.getElementById("lk-suggestions");
+        if (!box) return;
+        if (!value) {
+            this.clearSuggestions();
+            return;
+        }
+        clearTimeout(this.suggestTimer);
+        this.suggestTimer = setTimeout(async () => {
+            try {
+                const list = await API.get(`/customers/suggest?q=${encodeURIComponent(value)}`);
+                this.renderSuggestions(box, list);
+            } catch {
+                this.clearSuggestions();
+            }
+        }, 180);
+    },
+
+    clearSuggestions() {
+        const box = document.getElementById("lk-suggestions");
+        if (box) {
+            box.innerHTML = "";
+            box.classList.remove("open");
+        }
+    },
+
+    renderSuggestions(box, list) {
+        if (!list || list.length === 0) {
+            this.clearSuggestions();
+            return;
+        }
+        box.innerHTML = list
+            .map((u) => `
+                <button type="button" class="lookup-suggestion"
+                        data-action="kiosk-lookup-pick"
+                        data-username="${esc(u)}">${esc(u)}</button>
+            `)
+            .join("");
+        box.classList.add("open");
+    },
+
+    pickLookup(username) {
+        this.clearSuggestions();
+        const input = document.getElementById("lk-username");
+        if (input) input.value = username;
+        this.lookupUser(username);
     },
 
     async lookupUser(username) {

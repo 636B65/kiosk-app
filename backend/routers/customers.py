@@ -102,6 +102,32 @@ def list_customers(
     return result
 
 
+@router.get("/suggest", response_model=List[str])
+def suggest_customers(
+    q: str = "",
+    limit: int = 8,
+    db: Session = Depends(get_db),
+):
+    """Autocomplete for the kiosk user lookup: return existing usernames that
+    start with the typed prefix (public, matching the public lookup itself).
+
+    Deliberately returns only usernames - never balances or history - and is
+    capped so the kiosk cannot be used to dump the full customer list.
+    """
+    prefix = (q or "").strip().lower()
+    if not prefix:
+        return []
+    limit = max(1, min(limit, 20))
+    rows = (
+        db.query(Customer.username)
+        .filter(Customer.username.like(f"{prefix}%"))
+        .order_by(Customer.username)
+        .limit(limit)
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 @router.get("/{username}", response_model=CustomerHistoryOut)
 def customer_lookup(username: str, db: Session = Depends(get_db)):
     customer = find_customer(db, username)

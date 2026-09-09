@@ -166,12 +166,19 @@ server.listen(PORT, async () => {
       return `order ${ord[1]} — ${bal[1].trim()} (confetti ✓)`;
     });
 
-    await step("customer: new order resets", async () => {
-      await page.locator("#modal-overlay button", { hasText: "New Order" }).click();
-      await page.waitForTimeout(200);
+    await step("customer: lookup after buy opens lookup + typing username", async () => {
+      await page.locator("#modal-overlay button", { hasText: "Look up user" }).click();
+      await page.waitForSelector("#lookup-form");
+      await page.fill("#lk-username", "alice");
+      await page.locator("#lookup-form button[type=submit]").click();
+      await page.waitForTimeout(800);
+      const text = await page.locator("#modal-overlay").textContent();
+      if (!text.includes("Order #")) throw new Error("lookup after buy did not show history");
+      await page.locator("#modal-overlay button", { hasText: "Close" }).click();
+      await page.waitForTimeout(300);
       const badge = await page.locator("#cart-count").textContent();
-      if (badge.trim() !== "0") throw new Error("badge=" + badge);
-      return "cart cleared";
+      if (badge.trim() !== "0") throw new Error("cart not cleared after buy: " + badge);
+      return "history shown after buy lookup; cart cleared";
     });
 
     await step("customer: second buy same user", async () => {
@@ -209,6 +216,20 @@ server.listen(PORT, async () => {
       const balance = await modal.locator(".balance-big").textContent();
       if (!balance.includes("€")) throw new Error("no EUR balance: " + balance);
       return `balance ${balance.trim()}, ${totalBlocks} order(s), stats present`;
+    });
+
+    await step("customer: user lookup autocompletes while typing", async () => {
+      await page.locator("#modal-overlay button", { hasText: "Another user" }).click();
+      await page.waitForSelector("#lookup-form");
+      await page.fill("#lk-username", "ali");
+      await page.waitForSelector(".lookup-suggestion", { timeout: 5000 });
+      const suggestion = await page.locator(".lookup-suggestion").first().textContent();
+      if (!(suggestion || "").includes("alice")) throw new Error("expected 'alice' suggestion, got: " + suggestion);
+      await page.locator(".lookup-suggestion", { hasText: "alice" }).click();
+      await page.waitForTimeout(800);
+      const text = await page.locator("#modal-overlay").textContent();
+      if (!text.includes("Order #")) throw new Error("pick did not trigger lookup");
+      return `suggestion "${suggestion}" picked`;
     });
 
     await step("customer: lookup unknown user shows error", async () => {

@@ -110,6 +110,26 @@ def test_lookup_unknown_customer_404(client):
     assert client.get("/api/customers/nobody").status_code == 404
 
 
+def test_customer_suggest_prefix(client):
+    """Public autocomplete only returns matching usernames, capped."""
+    # Existing customers from earlier tests: 'alice', 'special_tester', 'abuser'
+    r = client.get("/api/customers/suggest?q=ali")
+    assert r.status_code == 200
+    assert "alice" in r.json()
+    # case-insensitive
+    r = client.get("/api/customers/suggest?q=ALI")
+    assert "alice" in r.json()
+    # no match -> empty, never leaks balances/history
+    r = client.get("/api/customers/suggest?q=zzz")
+    assert r.status_code == 200
+    assert r.json() == []
+    # empty query -> no dump
+    assert client.get("/api/customers/suggest?q=").json() == []
+    # limit honoured
+    r = client.get("/api/customers/suggest?q=a&limit=1")
+    assert len(r.json()) == 1
+
+
 # --------------------------------------------------------------------------- #
 # Security hardening
 # --------------------------------------------------------------------------- #

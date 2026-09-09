@@ -2,6 +2,37 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.12] - 2026-09-08
+
+### Added
+- **User-lookup autocomplete** (kiosk): while typing a username in the
+  "Payment lookup" modal, matching existing customer usernames are suggested
+  (debounced 180 ms) and can be picked with a click.
+  - New public endpoint `GET /api/customers/suggest?q=<prefix>&limit=8`
+    (`backend/routers/customers.py`): returns existing usernames that start
+    with the typed prefix (case-insensitive, ordered, capped at 20). It returns
+    **only usernames** — never balances/history — and an empty query returns
+    nothing, so the kiosk can't dump the customer list.
+  - Frontend: `Kiosk.suggestLookup` / `pickLookup` (`frontend/js/customer.js`),
+    new `data-action-input="kiosk-lookup-suggest"` and
+    `data-action="kiosk-lookup-pick"` handlers (`frontend/js/handlers.js`),
+    suggestion dropdown styling (`frontend/css/styles.css`).
+  - This only applies to the lookup modal; the checkout username field is
+    unchanged.
+- **Lookup right after buying** (kiosk): the order-complete confirmation now
+  offers a "**Look up user**" button that opens the (autocompleting) user
+  lookup, so a customer can type their username and check their balance/history
+  immediately after checking out. The "New Order" button is unchanged.
+
+### Tests
+- Backend: `test_customer_suggest_prefix` verifies prefix matching,
+  case-insensitivity, empty-result, empty-query and `limit` behaviour.
+- e2e: new steps verify typing a prefix shows an `alice` suggestion and that
+  clicking it opens the customer history, and that "Look up user" from the
+  order-complete modal opens the lookup and shows history after buying.
+
+All backend tests (30), ruff, mypy, and the full e2e suite (24 steps) pass.
+
 ## [1.0.11] - 2026-09-08
 
 ### Security (pen-test follow-up)

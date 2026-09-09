@@ -16,6 +16,7 @@ Built to run fully **offline (air-gapped)** via Docker Compose.
 - Confetti celebration animation when an order is completed
 - Purchases are added to the customer's balance (paid later at the counter)
 - "User lookup" to view your balance, stats, and full monthly order history
+  (typing a username suggests matching existing customers)
 - All prices in **EUR** (admin can change the currency in Settings)
 - Product photos uploaded by the admin (PNG/JPEG/WebP/GIF, up to 5 MB)
 - Weekly specials: admin marks products with a special price and they appear at
