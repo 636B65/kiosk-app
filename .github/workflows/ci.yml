@@ -59,15 +59,24 @@ jobs:
           pip install -U pip
           pip install -r requirements-dev.txt
 
-      - name: Install Chromium (system)
+      - name: Locate Chromium for tests
         run: |
-          # GitHub CI images pre-configure the Google Chrome apt repo, which is
-          # flaky (intermittent hash mismatches) and not used here — the e2e
-          # harness targets Ubuntu's chromium-browser. Drop it so
-          # `apt-get update` can't fail on it.
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends chromium-browser
+          # GitHub runner images ship Google Chrome at /usr/bin/google-chrome;
+          # prefer it and only fall back to apt (whose preconfigured Google
+          # repo on the runner is flaky). The harness launches with --no-sandbox.
+          local_path=""
+          if [ -x /usr/bin/google-chrome ]; then
+            local_path=/usr/bin/google-chrome
+          else
+            sudo apt-get update || true
+            sudo apt-get install -y --no-install-recommends chromium-browser || true
+            [ -x /usr/bin/chromium ] && local_path=/usr/bin/chromium
+          fi
+          if [ -z "$local_path" ]; then
+            echo "::error::No Chromium binary found (checked /usr/bin/google-chrome and apt chromium-browser)"
+            exit 1
+          fi
+          echo "CHROMIUM_PATH=$local_path" >> "$GITHUB_ENV"
 
       - name: Install npm dependencies
         run: npm ci
@@ -75,7 +84,7 @@ jobs:
       - name: Run e2e tests
         env:
           E2E_PYTHON: python
-          CHROMIUM_PATH: /usr/bin/chromium
+          CHROMIUM_PATH: ${{ env.CHROMIUM_PATH }}
         run: npm test
 
   integration-tls:
@@ -95,15 +104,24 @@ jobs:
         working-directory: tests/e2e
         run: npm ci
 
-      - name: Install Chromium (system)
+      - name: Locate Chromium for tests
         run: |
-          # GitHub CI images pre-configure the Google Chrome apt repo, which is
-          # flaky (intermittent hash mismatches) and not used here — the e2e
-          # harness targets Ubuntu's chromium-browser. Drop it so
-          # `apt-get update` can't fail on it.
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends chromium-browser
+          # GitHub runner images ship Google Chrome at /usr/bin/google-chrome;
+          # prefer it and only fall back to apt (whose preconfigured Google
+          # repo on the runner is flaky). The harness launches with --no-sandbox.
+          local_path=""
+          if [ -x /usr/bin/google-chrome ]; then
+            local_path=/usr/bin/google-chrome
+          else
+            sudo apt-get update || true
+            sudo apt-get install -y --no-install-recommends chromium-browser || true
+            [ -x /usr/bin/chromium ] && local_path=/usr/bin/chromium
+          fi
+          if [ -z "$local_path" ]; then
+            echo "::error::No Chromium binary found (checked /usr/bin/google-chrome and apt chromium-browser)"
+            exit 1
+          fi
+          echo "CHROMIUM_PATH=$local_path" >> "$GITHUB_ENV"
 
       - name: Build and start services (generates self-signed cert)
         env:
@@ -149,7 +167,7 @@ jobs:
       - name: HTTPS browser smoke (CSP + rendering + admin login)
         working-directory: tests/e2e
         env:
-          CHROMIUM_PATH: /usr/bin/chromium
+          CHROMIUM_PATH: ${{ env.CHROMIUM_PATH }}
           ADMIN_PASSWORD: smoke-test-password
         run: node https-smoke.js
 
