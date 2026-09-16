@@ -8,6 +8,6 @@
     "test": "node e2e.js"
   },
   "dependencies": {
-    "playwright": "^1.62.1"
+    "playwright": "^1.63.0"
   }
 }
