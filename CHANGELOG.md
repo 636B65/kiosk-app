@@ -2,6 +2,19 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.14] - 2026-09-16
+
+### Added
+- **`AGENTS.md`** with contributor/AI-agent guidance: quick commands (tests, lint, mypy,
+  e2e), architecture and layout, business rules (unpaid-order block, due-date, weekly
+  specials), backend/frontend conventions, config/env vars, release process, and the known
+  e2e/testing gotchas. Cloning the repo is now enough to spin up development and releases.
+- Minor: refreshed CI + e2e reporting so a failing step keeps the assertion detail.
+
+### Tests
+- All backend tests (41), the full e2e suite (24 steps), ruff, mypy, and JS syntax
+  validation pass.
+
 ## [1.0.13] - 2026-09-16
 
 ### Added
