@@ -181,7 +181,7 @@ server.listen(PORT, async () => {
       return "history shown after buy lookup; cart cleared";
     });
 
-    await step("customer: second buy same user", async () => {
+    await step("customer: second buy blocked while unpaid", async () => {
       await page.locator(".product-card", { hasText: "Chocolate Bar" }).first().locator(".add-btn").click();
       await page.locator(".cart-btn", { hasText: "Cart" }).click();
       await page.waitForSelector("#cart-overlay");
@@ -189,19 +189,16 @@ server.listen(PORT, async () => {
       await page.waitForSelector("#checkout-form");
       await page.fill("#co-username", "alice");
       await page.locator("#checkout-form button[type=submit]").click();
-      await page.waitForFunction(() => {
-        const t = document.querySelector("#modal-overlay")?.textContent || "";
-        return t.includes("Order #");
-      }, undefined, { timeout: 7000 });
-      const text = await page.locator("#modal-overlay").textContent();
-      const bal = text.match(/Balance to pay: (.+)/);
-      if (!bal) throw new Error("no balance");
-      return `${bal[1].trim()}`;
+      // alice still has an unpaid order -> checkout is rejected with an error toast
+      await page.waitForSelector(".toast.error", { timeout: 7000 });
+      const toast = await page.locator(".toast.error").last().textContent();
+      if (!toast.includes("still unpaid")) throw new Error("unexpected toast: " + toast);
+      return `blocked: ${toast.trim()}`;
     });
 
     await step("customer: user lookup shows balance + history + stats", async () => {
-      await page.locator("#modal-overlay button", { hasText: "New Order" }).click();
-      await page.waitForTimeout(300);
+      await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".product-card");
       await page.locator("#lookup-btn").click();
       await page.waitForSelector("#lookup-form");
       await page.fill("#lk-username", "alice");
@@ -346,7 +343,7 @@ server.listen(PORT, async () => {
       const text = await row.textContent();
       if (!text.includes("€")) throw new Error("no EUR balance");
       if ((await row.locator(".reset-payment").count()) !== 1) throw new Error("reset button missing");
-      return (await row.locator("td").nth(4).textContent()).trim();
+      return (await row.locator("td").nth(6).textContent()).trim();
     });
 
     await step("admin: view customer history from admin", async () => {
@@ -364,7 +361,7 @@ server.listen(PORT, async () => {
       await page.waitForSelector(".toast.success", { timeout: 5000 });
       await page.waitForTimeout(700);
       const row = page.locator("tr", { hasText: "alice" });
-      const balText = (await row.locator("td").nth(4).textContent()).replace(/\s+/g, "");
+      const balText = (await row.locator("td").nth(6).textContent()).replace(/\s+/g, "");
       if (balText !== "0,00€") throw new Error("balance not reset: " + balText);
       return "payment reset → " + balText;
     });
@@ -389,7 +386,36 @@ server.listen(PORT, async () => {
       await page.waitForTimeout(700);
       const text = await page.locator("#modal-overlay").textContent();
       if (!text.includes("No outstanding balance")) throw new Error("balance not zero");
+      await page.locator("#modal-overlay button", { hasText: "Close" }).click();
+      await page.waitForTimeout(300);
       return "customer sees 0 to pay";
+    });
+
+    await step("customer: buy again allowed after payment", async () => {
+      // The earlier blocked purchase left a Chocolate Bar in the persisted cart
+      // (localStorage), which turns that product's add button into qty controls.
+      // Clear it and reload to start from an empty cart.
+      await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
+      await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".product-card");
+      await page.locator(".product-card", { hasText: "Chocolate Bar" }).first().locator(".add-btn").click();
+      await page.locator(".cart-btn", { hasText: "Cart" }).click();
+      await page.waitForSelector("#cart-overlay");
+      await page.locator(".checkout-btn").click();
+      await page.waitForSelector("#checkout-form");
+      await page.fill("#co-username", "alice");
+      await page.locator("#checkout-form button[type=submit]").click();
+      // payment was reset, so the order is accepted this time
+      await page.waitForFunction(() => {
+        const t = document.querySelector("#modal-overlay")?.textContent || "";
+        return t.includes("Order #");
+      }, undefined, { timeout: 7000 });
+      const text = await page.locator("#modal-overlay").textContent();
+      const bal = text.match(/Balance to pay: (.+)/);
+      if (!bal) throw new Error("no balance");
+      await page.locator("#modal-overlay button", { hasText: "New Order" }).click();
+      await page.waitForTimeout(300);
+      return `accepted, balance ${bal[1].trim()}`;
     });
 
     await step("customer: sees updated store name on fresh load", async () => {

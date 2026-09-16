@@ -43,7 +43,11 @@ All notable changes to the Kiosk App are documented in this file.
   `test_cancel_preserves_previous_state`, `test_payment_due_date_setting_honored`,
   `test_customer_monthly_and_weekday_stats`, `test_summary_exposes_next_due_date`, and
   all `test_due_dates.py` unit tests.
-- All backend tests (41), ruff, mypy, and JS syntax validation pass.
+- e2e: the second kiosk buy now asserts the unpaid-checkout block toast; the admin
+  customers-table balance assertion tracks the new Orders/mo + Busiest day columns; a
+  new step verifies a customer can buy again once the admin resets their payment.
+- All backend tests (41), the full e2e suite (24 steps), ruff, mypy, and JS syntax
+  validation pass.
 
 ## [1.0.12] - 2026-09-08
 
