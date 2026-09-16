@@ -2,6 +2,19 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.15] - 2026-09-16
+
+### Changed
+- Dependency bumps (via Dependabot, merged as PRs #9–#12):
+  - `docker/build-push-action` `v6` → `v7` (`.github/workflows/publish-images.yml`).
+  - `docker/setup-buildx-action` `v3` → `v4` (`.github/workflows/publish-images.yml`).
+  - `docker/login-action` `v3` → `v4` (`.github/workflows/publish-images.yml`).
+  - `playwright` `^1.62.1` → `^1.63.0` (`tests/e2e`).
+
+### Tests
+- All backend tests (41), the full e2e suite (25 steps), ruff, mypy, and JS syntax
+  validation pass on the updated dependency set.
+
 ## [1.0.14] - 2026-09-16
 
 ### Added
