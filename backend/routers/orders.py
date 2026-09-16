@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
+from due_dates import get_due_date
 from models import Customer, Order, OrderItem, Product
 from schemas import OrderCreate, OrderItemOut, OrderOut
 from security import get_current_user
@@ -57,7 +58,26 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
 
     customer = get_or_create_customer(db, data.customer_username)
 
-    order = Order(status="pending", notes=data.notes, customer_id=customer.id)
+    has_unpaid = (
+        db.query(Order)
+        .filter(Order.customer_id == customer.id, Order.status == "pending")
+        .count()
+    )
+    if has_unpaid:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Your previous order is still unpaid. Ask the staff to mark it "
+                "as paid before you can buy again."
+            ),
+        )
+
+    order = Order(
+        status="pending",
+        notes=data.notes,
+        customer_id=customer.id,
+        due_date=get_due_date(db),
+    )
     subtotal = 0.0
     for item in data.items:
         product = db.get(Product, item.product_id)

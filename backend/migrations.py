@@ -1,6 +1,8 @@
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from due_dates import DUE_DATE_SETTING, compute_due_time, parse_due_date
+
 
 def _drop_column(conn, table: str, column: str):
     """Drop a column using a table rebuild (works on all SQLite versions).
@@ -89,6 +91,26 @@ def migrate(engine: Engine) -> None:
                         "ADD COLUMN customer_id INTEGER REFERENCES customers(id)"
                     )
                 )
+
+            if "due_date" not in columns:
+                conn.execute(text("ALTER TABLE orders ADD COLUMN due_date DATETIME"))
+
+            # Backfill due dates for orders created before the column existed:
+            # apply the configured payment due date if any, otherwise leave
+            # NULL (no end date is the default).
+            due_row = conn.execute(
+                text(f"SELECT value FROM settings WHERE key = '{DUE_DATE_SETTING}'")
+            ).first()
+            due = compute_due_time(parse_due_date(due_row[0] if due_row else None))
+            if due is not None:
+                stale = conn.execute(
+                    text("SELECT id FROM orders WHERE due_date IS NULL")
+                ).fetchall()
+                for (order_id,) in stale:
+                    conn.execute(
+                        text("UPDATE orders SET due_date = :due WHERE id = :oid"),
+                        {"due": due.isoformat(), "oid": order_id},
+                    )
 
             # Old statuses: 'completed' meant the order was paid.
             conn.execute(text("UPDATE orders SET status='paid' WHERE status='completed'"))

@@ -272,9 +272,12 @@ function renderCustomerStats(stats) {
         ["Total spent", fmt(stats.total_spent)],
         ["Total paid", fmt(stats.total_paid)],
         ["Average order", fmt(stats.avg_order)],
-        ["First order", stats.first_order_at ? new Date(stats.first_order_at).toLocaleDateString() : "—"],
-        ["Last order", stats.last_order_at ? new Date(stats.last_order_at).toLocaleDateString() : "—"],
+        ["Orders / month", stats.avg_orders_per_month],
+        ["Busiest day", esc(stats.busiest_day || "—")],
     ];
+    const months = stats.orders_per_month || [];
+    const weekdays = stats.orders_by_weekday || [];
+    const maxDay = Math.max(...weekdays.map((d) => d.orders), 1);
     return `
         <h3 style="margin:1rem 0 0.5rem;">Stats</h3>
         <div class="customer-stats">
@@ -285,5 +288,30 @@ function renderCustomerStats(stats) {
                 </div>
             `).join("")}
         </div>
+        ${months.length ? `
+            <div class="history-month-head" style="font-size:0.9rem;">Purchases by month</div>
+            <div class="customer-stats" style="margin-bottom:1rem;">
+                ${months.map((m) => `
+                    <div class="customer-stat">
+                        <div class="customer-stat-label">${esc(m.month)}</div>
+                        <div class="customer-stat-value">${m.orders} order(s) · ${fmt(m.spent)}</div>
+                    </div>
+                `).join("")}
+            </div>
+        ` : ""}
+        ${weekdays.length ? `
+            <div class="history-month-head" style="font-size:0.9rem;">Purchases by weekday</div>
+            <div style="margin:0.5rem 0 1rem; display:flex; flex-direction:column; gap:0.3rem;">
+                ${weekdays.map((d) => `
+                    <div style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem;">
+                        <span style="width:3.5rem; color:var(--muted);">${esc(d.day)}</span>
+                        <div style="flex:1; height:10px; background:var(--border); border-radius:5px; overflow:hidden;">
+                            <div style="height:100%; width:${Math.max(6, (d.orders / maxDay) * 100)}%; background:var(--primary); border-radius:5px;"></div>
+                        </div>
+                        <span style="width:2.5rem; text-align:right; font-weight:600;">${d.orders}</span>
+                    </div>
+                `).join("")}
+            </div>
+        ` : ""}
     `;
 }

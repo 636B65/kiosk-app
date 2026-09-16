@@ -46,6 +46,7 @@ def seed(db: Session):
         "store_name": "My Kiosk Store",
         "receipt_footer": "Thank you for your purchase!",
         "currency": "EUR",
+        "payment_due_date": "",
     }.items():
         if not db.get(Setting, key):
             db.add(Setting(key=key, value=value))

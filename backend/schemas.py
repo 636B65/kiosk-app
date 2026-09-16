@@ -120,6 +120,7 @@ class OrderOut(BaseModel):
     customer_username: Optional[str] = None
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    due_date: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -136,6 +137,18 @@ class CustomerOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MonthAgg(BaseModel):
+    month: str
+    orders: int = 0
+    spent: float = 0.0
+
+
+class WeekdayAgg(BaseModel):
+    day: str
+    orders: int = 0
+    spent: float = 0.0
+
+
 class CustomerStats(BaseModel):
     orders: int = 0
     total_spent: float = 0.0
@@ -147,6 +160,11 @@ class CustomerStats(BaseModel):
     last_order_at: Optional[datetime] = None
     top_item: Optional[str] = None
     top_item_qty: int = 0
+    avg_orders_per_month: float = 0.0
+    busiest_day: Optional[str] = None
+    orders_per_month: List[MonthAgg] = []
+    orders_by_weekday: List[WeekdayAgg] = []
+    next_due_date: Optional[datetime] = None
 
 
 class CustomerWithBalance(CustomerOut):

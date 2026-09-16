@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
+from due_dates import get_due_date
 from models import Order, OrderItem, Product
 from security import get_current_user
 from timeutil import utcnow
@@ -49,6 +50,7 @@ def summary(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
         "all_time": revenue_for_period(db),
         "outstanding": outstanding_total(db),
         "pending_orders": db.query(Order).filter(Order.status == "pending").count(),
+        "next_due_date": get_due_date(db),
         "low_stock_products": (
             db.query(Product)
             .filter(Product.is_active, Product.stock <= 5)

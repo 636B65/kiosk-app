@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,12 +6,22 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
+from due_dates import get_due_date
 from models import Customer, Order, OrderItem
-from schemas import CustomerHistoryOut, CustomerOut, CustomerStats, CustomerWithBalance
+from schemas import (
+    CustomerHistoryOut,
+    CustomerOut,
+    CustomerStats,
+    CustomerWithBalance,
+    MonthAgg,
+    WeekdayAgg,
+)
 from security import get_current_user
 from timeutil import utcnow
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
+
+WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 def find_customer(db: Session, username: str) -> Customer:
@@ -64,6 +75,19 @@ def stats_for(db: Session, customer_id: int) -> CustomerStats:
         .first()
     )
 
+    per_month = defaultdict(int)
+    month_spent = defaultdict(float)
+    per_weekday = defaultdict(int)
+    weekday_spent = defaultdict(float)
+    for o in orders:
+        per_month[o.created_at.strftime("%Y-%m")] += 1
+        month_spent[o.created_at.strftime("%Y-%m")] += o.total
+        per_weekday[o.created_at.weekday()] += 1
+        weekday_spent[o.created_at.weekday()] += o.total
+
+    busiest = max(per_weekday, key=per_weekday.get) if per_weekday else None
+    month_count = len(per_month) or 1
+
     return CustomerStats(
         orders=count,
         total_spent=round(total, 2),
@@ -75,6 +99,22 @@ def stats_for(db: Session, customer_id: int) -> CustomerStats:
         last_order_at=orders[-1].created_at if orders else None,
         top_item=top[0] if top else None,
         top_item_qty=int(top[1]) if top else 0,
+        avg_orders_per_month=round(count / month_count, 2),
+        busiest_day=WEEKDAY_NAMES[busiest] if busiest is not None else None,
+        orders_per_month=[
+            MonthAgg(month=k, orders=v, spent=round(month_spent[k], 2))
+            for k, v in sorted(per_month.items())
+        ],
+        orders_by_weekday=[
+            WeekdayAgg(
+                day=WEEKDAY_NAMES[w],
+                orders=per_weekday[w],
+                spent=round(weekday_spent[w], 2),
+            )
+            for w in range(7)
+            if w in per_weekday
+        ],
+        next_due_date=get_due_date(db),
     )
 
 

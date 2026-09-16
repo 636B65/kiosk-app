@@ -2,6 +2,49 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.13] - 2026-09-16
+
+### Added
+- **Store-wide payment due date** (`backend/due_dates.py`, `backend/routers/orders.py`,
+  `backend/routers/settings.py`). A new `payment_due_date` setting (an ISO date, e.g.
+  `2026-10-15`) sets the date by which outstanding balances must be paid. While it is
+  set, a new order's `due_date` column is stamped with that date; the setting is empty
+  by default, meaning orders have **no end date**.
+  - Customers with **any unpaid order** are blocked from placing a new order until their
+    balance is settled (`403` at checkout).
+  - Admin can set/clear the due date on the Settings page (empty = no end date) and see
+    the next due date in the customer modal.
+  - Kiosk checkout confirmation shows a "Next payment due" reminder when a balance exists
+    and a due date is configured.
+- **Per-user purchase statistics** (`backend/routers/customers.py`, `backend/schemas.py`,
+  `frontend/js/app.js`, `frontend/js/admin.js`). Each customer now receives:
+  - `avg_orders_per_month` and `busiest_day` (weekday name).
+  - `orders_per_month` (list of `{month, orders}`) and `orders_by_weekday` (list of
+    `{day, orders}`, Monday–Sunday order).
+  - `next_due_date` computed from the current balance.
+  Admin: customers table shows **Orders/mo** and **Busiest day** columns; the per-user
+  modal now displays all extended stats and the next due date. Kiosk lookup and
+  order-complete confirmation both show the due date when a balance is outstanding.
+- **Due date column on orders** (`backend/models.py`, `frontend/js/admin.js`).
+  The admin Orders table now includes a **Due** column; overdue pending orders are
+  highlighted in red with a ⚠ indicator.
+- **Database migration** (`backend/migrations.py`). Adds `due_date` column to the
+  `orders` table (nullable, backfilled from the configured `payment_due_date` if any,
+  otherwise left empty).
+- **Unit tests for due-date parsing** (`backend/tests/test_due_dates.py`). Covers
+  empty/invalid values (→ no due date), ISO date parsing, and end-of-day due time.
+
+### Tests
+- Existing tests adapted to the new single-pending-order business rule; several tests
+  now explicitly reset a customer's payment between purchases where two pending orders
+  were previously required.
+- New backend tests: `test_due_date_absent_by_default`,
+  `test_checkout_blocked_until_marked_paid`,
+  `test_cancel_preserves_previous_state`, `test_payment_due_date_setting_honored`,
+  `test_customer_monthly_and_weekday_stats`, `test_summary_exposes_next_due_date`, and
+  all `test_due_dates.py` unit tests.
+- All backend tests (41), ruff, mypy, and JS syntax validation pass.
+
 ## [1.0.12] - 2026-09-08
 
 ### Added

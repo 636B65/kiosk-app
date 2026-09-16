@@ -84,16 +84,19 @@ def test_checkout_creates_customer(client, products):
 
 
 def test_balance_accumulates_case_insensitive(client, products):
-    r1 = client.post(
+    # alice still has an unpaid order from test_checkout_creates_customer, so a
+    # new purchase must be blocked regardless of username casing.
+    r = client.post(
         "/api/orders",
         json={"customer_username": "Alice", "items": [{"product_id": products[1]["id"], "quantity": 1}]},
     )
-    assert r1.status_code == 201
+    assert r.status_code == 403
+    assert "unpaid" in r.json()["detail"].lower()
+    # no extra order or balance was created
     lookup = client.get("/api/customers/alice").json()
-    assert lookup["customer"]["username"] == "alice"
-    expected = products[0]["price"] * 2 + products[1]["price"]
-    assert lookup["balance"] == pytest.approx(expected)
-    assert len(lookup["orders"]) == 2
+    assert lookup["customer"]["username"] == "alice"  # case-insensitive match
+    assert len(lookup["orders"]) == 1
+    assert lookup["balance"] == pytest.approx(products[0]["price"] * 2)
 
 
 def test_checkout_requires_username(client, products):
@@ -300,12 +303,18 @@ def test_upload_rejects_spoofed_image(client, admin_headers, products):
 def test_customer_stats(client):
     lookup = client.get("/api/customers/alice").json()
     stats = lookup["stats"]
-    assert stats["orders"] == 2
-    assert stats["items_bought"] == 3  # 2 + 1
+    assert stats["orders"] == 1
+    assert stats["items_bought"] == 2
     assert stats["top_item_qty"] >= 1
     assert stats["total_spent"] == pytest.approx(
         stats["balance"] + stats["total_paid"]
     )
+    assert stats["avg_orders_per_month"] >= 1
+    assert stats["busiest_day"] in {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+    assert len(stats["orders_per_month"]) == 1
+    assert stats["orders_per_month"][0]["orders"] == 1
+    assert len(stats["orders_by_weekday"]) == 1
+    assert stats["next_due_date"] is None  # no due date configured by default
 
 
 # --------------------------------------------------------------------------- #
@@ -326,14 +335,14 @@ def test_admin_auth_required(client):
 def test_reports_outstanding_before_payment(client, admin_headers):
     summ = client.get("/api/reports/summary", headers=admin_headers).json()
     assert summ["outstanding"] > 0
-    assert summ["pending_orders"] >= 2
+    assert summ["pending_orders"] >= 1
     assert summ["today"]["revenue"] == 0  # nothing paid yet
 
 
 def test_reset_payment_clears_balance(client, admin_headers):
     r = client.post("/api/customers/alice/reset-payment", headers=admin_headers)
     assert r.status_code == 200
-    assert r.json()["settled"] >= 2
+    assert r.json()["settled"] == 1
     lookup = client.get("/api/customers/alice").json()
     assert lookup["balance"] == pytest.approx(0)
     assert lookup["total_paid"] > 0
@@ -371,6 +380,13 @@ def test_mark_order_paid(client, products, admin_headers):
     after = client.get("/api/customers/alice").json()
     assert after["total_paid"] > paid_before
     assert after["balance"] == pytest.approx(0)
+    # alice now has 2 orders / 3 items aggregate, and the per-month stats
+    # reflect both (same calendar month).
+    stats = after["stats"]
+    assert stats["orders"] == 2
+    assert stats["items_bought"] == 3
+    assert stats["orders_per_month"][0]["orders"] == 2
+    assert stats["avg_orders_per_month"] == 2.0
 
 
 # --------------------------------------------------------------------------- #
@@ -470,6 +486,11 @@ def test_order_uses_special_price_for_weekly_special(client, admin_headers, prod
     assert order["total"] == pytest.approx(2.0)
     assert order["total"] != pytest.approx(normal * 2)
 
+    # settle the tab so the next purchase is allowed (block rule)
+    assert client.post(
+        "/api/customers/special_tester/reset-payment", headers=admin_headers
+    ).status_code == 200
+
     # Non-special products still use their normal price.
     r2 = client.post(
         "/api/orders",
@@ -477,3 +498,127 @@ def test_order_uses_special_price_for_weekly_special(client, admin_headers, prod
     )
     assert r2.status_code == 201
     assert r2.json()["total"] == pytest.approx(products[1]["price"])
+
+
+# --------------------------------------------------------------------------- #
+# Payment due dates / per-user statistics
+# --------------------------------------------------------------------------- #
+def _parse_api_dt(value):
+    from datetime import datetime
+
+    return datetime.fromisoformat(str(value).replace(" ", "T"))
+
+
+def test_due_date_absent_by_default(client, products):
+    """With no payment due date configured, orders get no due date at all."""
+    assert client.get("/api/settings").json().get("payment_due_date", "") == ""
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "due_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+    )
+    assert r.status_code == 201
+    assert r.json()["due_date"] is None
+
+
+def test_checkout_blocked_until_marked_paid(client, products, admin_headers):
+    """A user with any unpaid order cannot buy again until they are paid up."""
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+    )
+    assert r.status_code == 201
+
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+    )
+    assert r.status_code == 403
+    assert "mark it as paid" in r.json()["detail"]
+
+    # mark paid -> purchase allowed again
+    assert client.post(
+        "/api/customers/blocked_tester/reset-payment", headers=admin_headers
+    ).status_code == 200
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+    )
+    assert r.status_code == 201
+
+
+def test_cancel_preserves_previous_state(client, products):
+    """Cancelling an order removes it from the outstanding balance."""
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "cancel_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+    )
+    assert r.status_code == 201
+    order_id = r.json()["id"]
+    # admin cancels the pending order, releasing the block
+    login = client.post(
+        "/api/auth/login", json={"username": "admin", "password": ADMIN_PASSWORD}
+    ).json()
+    headers = {"Authorization": f"Bearer {login['access_token']}"}
+    r = client.patch(
+        f"/api/orders/{order_id}/status?new_status=cancelled", headers=headers
+    )
+    assert r.status_code == 200
+    r = client.post(
+        "/api/orders",
+        json={"customer_username": "cancel_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+    )
+    assert r.status_code == 201
+    assert client.get("/api/customers/cancel_tester").json()["balance"] == pytest.approx(
+        products[2]["price"]
+    )
+
+
+def test_payment_due_date_setting_honored(client, admin_headers, products):
+    """Setting a payment due date stamps it on new orders and is exposed as the
+    customer's next due date; clearing it re-enables "no end date"."""
+    from datetime import datetime
+
+    assert client.put(
+        "/api/settings/payment_due_date",
+        json={"key": "payment_due_date", "value": "2026-10-15"},
+        headers=admin_headers,
+    ).status_code == 200
+    try:
+        r = client.post(
+            "/api/orders",
+            json={"customer_username": "duedate_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+        )
+        assert r.status_code == 201
+        assert _parse_api_dt(r.json()["due_date"]) == datetime(2026, 10, 15, 23, 59, 59)
+        stats = client.get("/api/customers/duedate_tester").json()["stats"]
+        assert _parse_api_dt(stats["next_due_date"]) == datetime(2026, 10, 15, 23, 59, 59)
+    finally:
+        client.put(
+            "/api/settings/payment_due_date",
+            json={"key": "payment_due_date", "value": ""},
+            headers=admin_headers,
+        )
+
+
+def test_customer_monthly_and_weekday_stats(client):
+    """special_tester has two orders in the same month -> aggregated stats."""
+    lookup = client.get("/api/customers/special_tester").json()
+    stats = lookup["stats"]
+    assert stats["orders"] == 2
+    assert stats["avg_orders_per_month"] == 2.0
+    assert {m["month"] for m in stats["orders_per_month"]} == {
+        lookup["orders"][0]["created_at"][:7]
+    }
+    assert stats["orders_per_month"][0]["orders"] == 2
+    assert stats["orders_by_weekday"], "weekday aggregation should be filled"
+    assert sum(d["orders"] for d in stats["orders_by_weekday"]) == 2
+    assert stats["busiest_day"] == stats["orders_by_weekday"][0]["day"]
+    assert stats["next_due_date"] is None  # no end date by default
+
+
+def test_summary_exposes_next_due_date(client, admin_headers):
+    summ = client.get("/api/reports/summary", headers=admin_headers).json()
+    assert "next_due_date" in summ
+    assert summ["next_due_date"] is None  # no due date configured by default
+    assert "due_day" not in summ
+    assert client.get("/api/reports/summary").status_code == 401  # still protected

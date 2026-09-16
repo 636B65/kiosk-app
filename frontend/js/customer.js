@@ -215,6 +215,7 @@ const Kiosk = {
                     </button>
                     <p style="font-size:0.8rem; color:var(--muted); text-align:center; margin:0;">
                         The amount is added to your balance and paid at the counter on a later visit.
+                        You can buy again once your previous orders are marked as paid.
                     </p>
                 </div>
             </div>
@@ -277,6 +278,9 @@ const Kiosk = {
             <p><strong>Order total:</strong> ${fmt(order.total)}</p>
             ${history ? `
                 <p style="color:var(--warning); font-weight:700;">Balance to pay: ${fmt(history.balance)}</p>
+                ${history.stats?.next_due_date && history.balance > 0 ? `
+                    <p style="color:var(--muted);">Next payment due: <strong>${new Date(history.stats.next_due_date).toLocaleDateString()}</strong></p>
+                ` : ""}
             ` : ""}
             <p style="color:var(--muted);">${esc(Store.settings.receipt_footer || "Thank you for your purchase!")}</p>
             <div class="form-actions">
@@ -401,6 +405,11 @@ const Kiosk = {
                     ? `${unpaidCount} unpaid order(s) — pay this at the counter`
                     : "No outstanding balance 🎉"}
             </p>
+            ${data.stats?.next_due_date && data.balance > 0 ? `
+                <p style="text-align:center; color:var(--warning); font-weight:600; margin:0 0 0.5rem;">
+                    Next payment due: ${new Date(data.stats.next_due_date).toLocaleDateString()}
+                </p>
+            ` : ""}
             <div style="display:flex; justify-content:space-between; padding:0.5rem 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); margin-bottom:1rem;">
                 <span style="color:var(--muted);">Total paid</span>
                 <span style="font-weight:700;">${fmt(data.total_paid)}</span>

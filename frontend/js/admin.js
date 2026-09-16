@@ -503,15 +503,18 @@ const Admin = {
                 </div>
                 <div class="panel">
                 <table>
-                    <thead><tr><th>#</th><th>Date</th><th>User</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>#</th><th>Date</th><th>User</th><th>Items</th><th>Total</th><th>Due</th><th>Status</th><th></th></tr></thead>
                     <tbody>
-                        ${orders.map((o) => `
+                        ${orders.map((o) => {
+                            const overdue = o.status === "pending" && o.due_date && new Date(o.due_date) < new Date();
+                            return `
                             <tr>
                                 <td>${o.id}</td>
                                 <td>${new Date(o.created_at).toLocaleString()}</td>
                                 <td>${o.customer_username ? esc(o.customer_username) : "—"}</td>
                                 <td><button class="btn btn-secondary view-order" data-id="${o.id}">View items</button></td>
                                 <td>${fmt(o.total)}</td>
+                                <td style="${overdue ? "color:var(--danger); font-weight:700;" : ""}">${o.due_date ? new Date(o.due_date).toLocaleDateString() + (overdue ? " ⚠" : "") : "—"}</td>
                                 <td><span class="status-badge status-${o.status}">${o.status}</span></td>
                                 <td class="table-actions">
                                     ${o.status === "pending" ? `
@@ -520,7 +523,7 @@ const Admin = {
                                     ` : ""}
                                 </td>
                             </tr>
-                        `).join("")}
+                        `}).join("")}
                     </tbody>
                 </table>
                 </div>
@@ -592,15 +595,17 @@ const Admin = {
                 </p>
                 <div class="panel">
                 <table>
-                    <thead><tr><th>User</th><th>Created</th><th>Orders</th><th>Total paid</th><th>Balance to pay</th><th></th></tr></thead>
+                    <thead><tr><th>User</th><th>Created</th><th>Orders</th><th>Orders/mo</th><th>Busiest day</th><th>Total paid</th><th>Balance to pay</th><th></th></tr></thead>
                     <tbody>
                         ${customers.length === 0
-                            ? '<tr><td colspan="6">No customers yet</td></tr>'
+                            ? '<tr><td colspan="8">No customers yet</td></tr>'
                             : customers.map((c) => `
                             <tr>
                                 <td><strong>${esc(c.username)}</strong></td>
                                 <td>${new Date(c.created_at).toLocaleDateString()}</td>
                                 <td>${c.order_count}</td>
+                                <td>${c.stats.avg_orders_per_month}</td>
+                                <td>${c.stats.busiest_day ? esc(c.stats.busiest_day) : "—"}</td>
                                 <td>${fmt(c.total_paid)}</td>
                                 <td style="${c.balance > 0 ? "color:var(--warning); font-weight:700;" : "color:var(--success);"}">${fmt(c.balance)}</td>
                                 <td class="table-actions">
@@ -642,6 +647,11 @@ const Admin = {
                 <h2>👤 ${esc(data.customer.username)}</h2>
                 <div class="balance-big">${fmt(data.balance)}</div>
                 <p style="text-align:center; color:var(--muted); margin-bottom:1rem;">balance to pay</p>
+                ${data.stats.next_due_date && data.balance > 0 ? `
+                    <p style="text-align:center; color:var(--warning); font-weight:600; margin:0 0 0.5rem;">
+                        Next payment due: ${new Date(data.stats.next_due_date).toLocaleDateString()}
+                    </p>
+                ` : ""}
                 <div style="display:flex; justify-content:space-between; padding:0.5rem 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); margin-bottom:1rem;">
                     <span style="color:var(--muted);">Total paid</span>
                     <span style="font-weight:700;">${fmt(data.total_paid)}</span>
@@ -883,6 +893,11 @@ const Admin = {
         await Store.loadPublicData();
         const app = document.getElementById("admin-main-container");
         const settings = Store.settings;
+        let nextDue = null;
+        try {
+            nextDue = await API.get("/reports/summary");
+        } catch {}
+        const dueDate = settings.payment_due_date ?? "";
         app.innerHTML = `
             <div class="admin-main">
                 <h2>Store Settings</h2>
@@ -905,6 +920,15 @@ const Admin = {
                             `).join("")}
                         </select>
                     </div>
+                    <div class="form-group" style="border-top:1px solid var(--border); padding-top:1rem;">
+                        <label>Payment Due Date (optional)</label>
+                        <input id="s-payment_due_date" type="date" value="${esc(dueDate)}">
+                        <div style="font-size:0.8rem; color:var(--muted); margin-top:0.25rem;">
+                            Orders must be paid by this date. Leave empty for no end
+                            date (default).
+                            ${nextDue?.next_due_date ? ` · Next due: <strong>${new Date(nextDue.next_due_date).toLocaleDateString()}</strong>` : ""}
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label style="display:flex; align-items:center; gap:0.5rem;">
                             <input type="checkbox" id="s-debug_mode" ${Debug.isOn(settings) ? "checked" : ""}>
@@ -923,6 +947,7 @@ const Admin = {
             receipt_footer: document.getElementById("s-receipt_footer").value,
             currency: document.getElementById("s-currency").value,
             debug_mode: document.getElementById("s-debug_mode").checked ? "true" : "false",
+            payment_due_date: document.getElementById("s-payment_due_date").value.trim(),
         };
         try {
             for (const [key, value] of Object.entries(fields)) {
