@@ -1,6 +1,6 @@
 -r requirements.txt
 # Test + quality tooling
 pytest==9.1.1
-httpx2==2.12.0
-ruff==0.16.6
+httpx2==2.13.0
+ruff==0.16.7
 mypy==2.3.1
