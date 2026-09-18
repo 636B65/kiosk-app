@@ -2,6 +2,21 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.16] - 2026-09-18
+
+### Changed
+- Dependency bumps (via Dependabot, merged as PRs #13–#14):
+  - `uvicorn[standard]` `0.52.4` → `0.53.0` (backend prod).
+  - `sqlalchemy` `2.0.52` → `2.0.53` (backend prod).
+  - `pyjwt` `2.13.0` → `2.14.0` (backend prod — security hardening for HMAC key validation,
+    JWKS redirect/rejection, and nested JWS/JWK parsing).
+  - `httpx2` `2.12.0` → `2.13.0` (backend dev — TLS verification fixes, safer async cleanup).
+  - `ruff` `0.16.6` → `0.16.7` (backend dev — bug fixes and performance).
+
+### Tests
+- All backend tests (41), the full e2e suite (25 steps), ruff, mypy, and JS syntax
+  validation pass on the updated dependency set.
+
 ## [1.0.15] - 2026-09-16
 
 ### Changed
