@@ -2,6 +2,23 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.17] - 2026-09-18
+
+### Added
+- **GitHub Pages live demo** (https://636b65.github.io/kiosk-app/): a new
+  `frontend/js/demo.js` in-browser mock of the API plus a `.github/workflows/pages.yml`
+  that deploys `frontend/` to GitHub Pages on every push touching `frontend/**`. The
+  demo activates automatically on `*.github.io` hosts (or `?demo=1`) and seeds fresh
+  products/categories/customers/orders on every load; admin login is `admin` /
+  `demo-password123`. The mock stays a no-op in production and in the e2e suite.
+- `frontend/.nojekyll` marker so Pages serves the static files as-is.
+
+### Tests
+- Full e2e suite (25 steps) still passes with `demo.js` wired into `index.html`; a
+  Playwright smoke run against a static server with `?demo=1` verifies products, cart
+  checkout, admin login/dashboard, customers, orders, and lookup suggestions with no JS
+  errors.
+
 ## [1.0.16] - 2026-09-18
 
 ### Changed

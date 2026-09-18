@@ -58,9 +58,10 @@ backend/
   routers/         auth, categories, customers, orders, products, reports, settings, users
   tests/           test_api.py (full API suite) + test_due_dates.py (units)
 frontend/
-  index.html       no <meta> CSP; scripts loaded in fixed order (api -> app -> customer -> admin -> handlers -> debug)
+  index.html       no <meta> CSP; scripts loaded in fixed order (demo -> api -> app -> customer -> admin -> handlers -> debug)
   css/             styles.css
   js/
+    demo.js        in-browser API mock for the GitHub Pages demo (no-op unless .github.io host or ?demo=1)
     api.js         fetch wrapper + token storage
     app.js         entry: route handling, Store, Toast, Modal, currency list
     customer.js    Kiosk cart/checkout + user lookup
@@ -117,6 +118,13 @@ tests/e2e/
 
 - **No build step, no JS modules.** Globals: `Store`, `API`, `Modal`, `Toast`, `Kiosk`,
   `Admin`, `Actions`, `Debug`. Script include order in `index.html` defines load order.
+- `demo.js` is a `<script>` hook loaded **before** `api.js`. It is a no-op unless the
+  host is `*.github.io` or the URL has `?demo=1`; in demo mode it replaces `window.fetch`
+  with an in-memory mock of every endpoint the frontend calls (routes mirror
+  `backend/routers/*`). `api.js` binds `const API`, so the mock must never reassign it —
+  it intercepts at the `fetch` level. Keep `demo.js` in lockstep with backend routes and
+  schemas when anything changes, and keep the seed data (products/customers/orders)
+  consistent (order items must not exceed the seeded stock).
 - **Event handling MUST use the `Actions` registry** (`data-action` attributes, delegated
   click/input listeners in `handlers.js`). Do NOT add `onclick=` inline handlers — they fight
   the CSP-less page and the codebase convention.

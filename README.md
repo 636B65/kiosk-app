@@ -7,6 +7,18 @@ customer balances.
 
 Built to run fully **offline (air-gapped)** via Docker Compose.
 
+## Live demo
+
+Try the frontend without a backend: **https://636b65.github.io/kiosk-app/**
+
+GitHub Pages hosts the static frontend with an in-browser mock of the API
+(`frontend/js/demo.js`), so the whole kiosk + admin panel is interactive with
+sample data. Everything lives in your browser and **resets on reload**.
+
+- Demo mode triggers automatically on GitHub Pages (or manually with `?demo=1`
+  on any static server).
+- Admin login for the demo: **`admin`** / `demo-password123`.
+
 ## Features
 
 **Customer kiosk** (`/`)
