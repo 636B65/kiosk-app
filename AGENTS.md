@@ -13,7 +13,8 @@ check out on a "tab" under their username, and the **staff mark orders as paid l
 - Tests: pytest (backend) + a zero-dependency Playwright harness (e2e, uses system Chromium).
 - CI: 3 jobs — Backend API tests, End-to-end browser tests, Docker + TLS smoke (`ci.yml`).
 - Releases: every `v*` tag triggers `publish-images.yml`, which builds and pushes
-  `ghcr.io/636b65/kiosk/backend` and `.../frontend` images (`v<tag>` + `latest`).
+  `ghcr.io/636b65/kiosk/backend` and `.../frontend` images. The `docker/metadata-action`
+  semver pattern strips the leading `v`, so tag `v1.0.17` publishes as `1.0.17` + `latest`.
 
 ## Quick commands
 
