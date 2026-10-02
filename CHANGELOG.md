@@ -13,11 +13,35 @@ All notable changes to the Kiosk App are documented in this file.
   `demo-password123`. The mock stays a no-op in production and in the e2e suite.
 - `frontend/.nojekyll` marker so Pages serves the static files as-is.
 
+### Changed
+- Dependency bumps (via Dependabot, merged as PRs #15, #17, #19–#21):
+  - `sqlalchemy` `2.0.53` → `2.1.1` (backend prod). The 2.1 line adds
+    `composite.column_template`, ORM pickling and `aliased()` fixes, and drops the
+    deprecated underscore-separated extra names from the sdist metadata. The classic
+    `Column(...)` models in `models.py` are unaffected.
+  - `pyjwt` `2.14.0` → `2.15.1` (backend prod). Deeply nested payloads now raise
+    `DecodeError` instead of leaking a raw `RecursionError`, JWK sets are parsed once per
+    cache entry, and trailing Base64URL `=` padding is accepted.
+  - `uvicorn[standard]` `0.53.0` → `0.54.0` (backend prod) — HTTP/2 response trailers and
+    `103 Early Hints`, both still experimental and opt-in.
+  - `httpx2` `2.13.0` → `2.13.1` (backend dev) — `Content-Length` from a file's remaining
+    bytes, proxy TLS/`sni_hostname` handling, clean sync WebSocket shutdown.
+  - `ruff` `0.16.7` → `0.16.9` (backend dev) — bug fixes and rule changes.
+- GitHub Actions bumps in `.github/workflows/pages.yml` (PRs #15, #17, #19):
+  `actions/configure-pages` `v5` → `v6` (Node 24), `actions/upload-pages-artifact` `v3` →
+  `v5`, `actions/deploy-pages` `v4` → `v5` (Node 24).
+- `pages.yml` now passes `include-hidden-files: true` to `upload-pages-artifact`. That
+  action skips dotfiles from v4 onward, so without it the upload would silently drop the
+  `.nojekyll` marker added in 1.0.17.
+
 ### Tests
 - Full e2e suite (25 steps) still passes with `demo.js` wired into `index.html`; a
   Playwright smoke run against a static server with `?demo=1` verifies products, cart
   checkout, admin login/dashboard, customers, orders, and lookup suggestions with no JS
   errors.
+- All backend tests (41), the full e2e suite (25 steps), ruff, mypy, and JS syntax
+  validation pass against the updated dependency set, installed from the pinned
+  `requirements.txt` / `requirements-dev.txt`.
 
 ## [1.0.16] - 2026-09-18
 
