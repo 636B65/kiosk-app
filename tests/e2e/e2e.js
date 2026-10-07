@@ -114,6 +114,24 @@ server.listen(PORT, async () => {
     }
   }
 
+  // Set the store-wide payment due date through the admin API. Only an
+  // overdue due date blocks checkout, so the block step needs one in the past.
+  async function setPaymentDueDate(value) {
+    const login = await fetch(`http://${BACKEND}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: process.env.E2E_ADMIN_PASSWORD || "test-admin-password" }),
+    });
+    if (!login.ok) throw new Error("admin login failed: " + login.status);
+    const { access_token } = await login.json();
+    const res = await fetch(`http://${BACKEND}/api/settings/payment_due_date`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${access_token}` },
+      body: JSON.stringify({ key: "payment_due_date", value }),
+    });
+    if (!res.ok) throw new Error("failed to set payment_due_date: " + res.status);
+  }
+
   try {
     // ---- CUSTOMER FLOW ----
     await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
@@ -181,19 +199,26 @@ server.listen(PORT, async () => {
       return "history shown after buy lookup; cart cleared";
     });
 
-    await step("customer: second buy blocked while unpaid", async () => {
-      await page.locator(".product-card", { hasText: "Chocolate Bar" }).first().locator(".add-btn").click();
-      await page.locator(".cart-btn", { hasText: "Cart" }).click();
-      await page.waitForSelector("#cart-overlay");
-      await page.locator(".checkout-btn").click();
-      await page.waitForSelector("#checkout-form");
-      await page.fill("#co-username", "alice");
-      await page.locator("#checkout-form button[type=submit]").click();
-      // alice still has an unpaid order -> checkout is rejected with an error toast
-      await page.waitForSelector(".toast.error", { timeout: 7000 });
-      const toast = await page.locator(".toast.error").last().textContent();
-      if (!toast.includes("still unpaid")) throw new Error("unexpected toast: " + toast);
-      return `blocked: ${toast.trim()}`;
+    await step("customer: second buy blocked while unpaid (overdue)", async () => {
+      // The unpaid-order block only fires when a payment due date is set AND
+      // has passed; make the store overdue for this step, then restore "".
+      await setPaymentDueDate("2020-01-01");
+      try {
+        await page.locator(".product-card", { hasText: "Chocolate Bar" }).first().locator(".add-btn").click();
+        await page.locator(".cart-btn", { hasText: "Cart" }).click();
+        await page.waitForSelector("#cart-overlay");
+        await page.locator(".checkout-btn").click();
+        await page.waitForSelector("#checkout-form");
+        await page.fill("#co-username", "alice");
+        await page.locator("#checkout-form button[type=submit]").click();
+        // alice still has an unpaid order and the due date passed -> rejected
+        await page.waitForSelector(".toast.error", { timeout: 7000 });
+        const toast = await page.locator(".toast.error").last().textContent();
+        if (!toast.includes("still unpaid")) throw new Error("unexpected toast: " + toast);
+        return `blocked: ${toast.trim()}`;
+      } finally {
+        await setPaymentDueDate("");
+      }
     });
 
     await step("customer: user lookup shows balance + history + stats", async () => {
@@ -416,6 +441,32 @@ server.listen(PORT, async () => {
       await page.locator("#modal-overlay button", { hasText: "New Order" }).click();
       await page.waitForTimeout(300);
       return `accepted, balance ${bal[1].trim()}`;
+    });
+
+    await step("customer: tab stays open without a due date (buy again while unpaid)", async () => {
+      // Regression for the v1.0.13 due-date change: with no payment due date
+      // configured, a customer with an unpaid balance must still be able to
+      // add another order to their tab instead of getting a 403 block.
+      await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
+      await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".product-card");
+      await page.locator(".product-card", { hasText: "Chocolate Bar" }).first().locator(".add-btn").click();
+      await page.locator(".cart-btn", { hasText: "Cart" }).click();
+      await page.waitForSelector("#cart-overlay");
+      await page.locator(".checkout-btn").click();
+      await page.waitForSelector("#checkout-form");
+      await page.fill("#co-username", "alice");
+      await page.locator("#checkout-form button[type=submit]").click();
+      await page.waitForFunction(() => {
+        const t = document.querySelector("#modal-overlay")?.textContent || "";
+        return t.includes("Order #");
+      }, undefined, { timeout: 7000 });
+      const text = await page.locator("#modal-overlay").textContent();
+      const bal = text.match(/Balance to pay: (.+)/);
+      if (!bal) throw new Error("no balance after stacked purchase");
+      const amount = parseFloat(bal[1].replace(/[^\d,]/g, "").replace(",", "."));
+      if (!(amount > 3.49)) throw new Error("tab did not stack: balance " + bal[1]);
+      return `stacked, balance ${bal[1].trim()}`;
     });
 
     await step("customer: sees updated store name on fresh load", async () => {

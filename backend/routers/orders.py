@@ -58,19 +58,24 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
 
     customer = get_or_create_customer(db, data.customer_username)
 
-    has_unpaid = (
-        db.query(Order)
-        .filter(Order.customer_id == customer.id, Order.status == "pending")
-        .count()
-    )
-    if has_unpaid:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Your previous order is still unpaid. Ask the staff to mark it "
-                "as paid before you can buy again."
-            ),
+    # Only an OVERDUE balance blocks the next purchase: no due date configured
+    # (or one still in the future) means the tab stays open and orders stack.
+    due = get_due_date(db)
+    if due is not None and due < utcnow():
+        has_unpaid = (
+            db.query(Order)
+            .filter(Order.customer_id == customer.id, Order.status == "pending")
+            .count()
         )
+        if has_unpaid:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "The payment due date has passed and your previous order is "
+                    "still unpaid. Ask the staff to mark it as paid before you "
+                    "can buy again."
+                ),
+            )
 
     order = Order(
         status="pending",

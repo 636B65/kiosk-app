@@ -215,7 +215,8 @@ const Kiosk = {
                     </button>
                     <p style="font-size:0.8rem; color:var(--muted); text-align:center; margin:0;">
                         The amount is added to your balance and paid at the counter on a later visit.
-                        You can buy again once your previous orders are marked as paid.
+                        You can keep shopping on your tab; once the payment due date has passed,
+                        unpaid balances must be settled at the counter before the next purchase.
                     </p>
                 </div>
             </div>

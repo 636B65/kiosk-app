@@ -79,17 +79,23 @@ tests/e2e/
 - **Tab checkout**: `POST /api/orders` accepts a username (not a paid transaction). An
   order is created as `pending`; staff settle it via `PATCH /api/orders/{id}/status` or the
   admin "Reset payment" for a whole customer.
-- **Unpaid-order block**: if the customer already has an order with `status == "pending"`,
-  checkout returns **403** "Your previous order is still unpaid. Ask the staff to mark it
-  as paid before you can buy again." (cancelled orders do NOT block). This is enforced
-  server-side in `routers/orders.py::create_order`; the kiosk shows the message as a red toast.
+- **Unpaid-order block (overdue only)**: checkout returns **403** "The payment due date has
+  passed and your previous order is still unpaid. Ask the staff to mark it as paid before
+  you can buy again." only when a store-wide `payment_due_date` is configured **and has
+  already passed** AND the customer has an order with `status == "pending"` (cancelled
+  orders do NOT block). With no due date — or one still in the future — the tab stays open
+  and orders stack freely (this guard was unconditional from v1.0.13 until the fix, which
+  made every second purchase fail). Enforced server-side in `routers/orders.py::create_order`;
+  the kiosk shows the message as a red toast; `demo.js` mirrors the rule for the GitHub Pages demo.
 - **Reset payment** (`POST /api/customers/{username}/reset-payment`) marks ALL pending
-  orders of a customer as `paid`. This is the only unblock besides setting them paid individually.
+  orders of a customer as `paid`. Unblocks are: this endpoint, paying orders individually,
+  cancelling them, or clearing/moving the due date back into the future.
 - **Admin payment**: `PATCH /api/orders/{id}/status` accepts `pending|paid|cancelled`.
   Cancelling a `pending` order **restores stock**; paid orders can't have stock restored.
 - **Due date**: Setting `payment_due_date` (ISO date `YYYY-MM-DD`, default `""` = no end date).
   When set, new orders get `due_date = <that date> 23:59:59` (naive UTC). Empty/invalid = `NULL`.
-  This is the store-wide "pay by" moment shown in admin and on customer lookups.
+  This is the store-wide "pay by" moment shown in admin and on customer lookups, and once it
+  has passed it gates further checkout while a balance is outstanding (see the block rule above).
 - **Weekly specials / pricing**: a product's displayed price is `special_price` when
   `is_weekly_special` is true, else `price`. Orders always store the price snapshotted
   at purchase time in `OrderItem.unit_price` (and `product_name`), so admin order lines

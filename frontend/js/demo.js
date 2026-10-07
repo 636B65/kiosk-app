@@ -507,8 +507,9 @@
             const customer = getOrCreateCustomer(body.customer_username);
             if (!customer) throw new ApiError(HTTP.BAD_REQUEST, "A username is required");
             if (!body.items || body.items.length === 0) throw new ApiError(HTTP.BAD_REQUEST, "Order must contain items");
-            if (pendingOrdersFor(customer.id).length > 0) {
-                throw new ApiError(HTTP.FORBIDDEN, "Your previous order is still unpaid. Ask the staff to mark it as paid before you can buy again.");
+            const due = dueTime();
+            if (due && new Date(due) < new Date() && pendingOrdersFor(customer.id).length > 0) {
+                throw new ApiError(HTTP.FORBIDDEN, "The payment due date has passed and your previous order is still unpaid. Ask the staff to mark it as paid before you can buy again.");
             }
             const items = [];
             let subtotal = 0;

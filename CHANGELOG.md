@@ -2,6 +2,36 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.18] - 2026-10-07
+
+### Fixed
+- **Checkout no longer blocks every second purchase** — regression introduced with the
+  v1.0.13 payment due date. The `403` "previous order is still unpaid" guard in
+  `backend/routers/orders.py::create_order` used to fire whenever the customer had a
+  single `pending` order, so after one purchase a customer could never buy again until
+  the staff used *Reset payment* — even with **no due date configured** or one set days
+  after the purchase. The guard now only fires when a store-wide `payment_due_date` is
+  configured **and has already passed** while the customer still has an unpaid balance.
+  With no due date (or one still in the future) the tab stays open and orders stack
+  freely, as they did before v1.0.13; once the due date does pass, outstanding balances
+  must be settled (or the admin moves/clears the date) before the next purchase.
+  The 403 message now explains the cause: "The payment due date has passed and your
+  previous order is still unpaid. Ask the staff to mark it as paid before you can buy again."
+  Mirrored in `frontend/js/demo.js` for the GitHub Pages demo; the kiosk cart footer
+  copy in `frontend/js/customer.js` was updated to match.
+
+### Changed
+- **AGENTS.md** business rules updated: unpaid-order block documented as overdue-only,
+  *Reset payment* unblock list extended (settle individually, cancel, or move the due
+  date forward).
+
+### Tests
+- All backend tests (42 — added `test_tab_stays_open_without_due_date`; the overdue-block
+  and case-insensitive-block tests now set/clear a past `payment_due_date` around the
+  blocked attempts), the full e2e suite (26 steps — the block step now makes the store
+  overdue via the admin API first, plus a new "tab stays open without a due date" step
+  covering the fix), ruff, mypy, and JS syntax validation pass.
+
 ## [1.0.17] - 2026-09-18
 
 ### Added

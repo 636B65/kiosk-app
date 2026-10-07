@@ -83,20 +83,33 @@ def test_checkout_creates_customer(client, products):
     assert order["total"] == pytest.approx(products[0]["price"] * 2)
 
 
-def test_balance_accumulates_case_insensitive(client, products):
-    # alice still has an unpaid order from test_checkout_creates_customer, so a
-    # new purchase must be blocked regardless of username casing.
-    r = client.post(
-        "/api/orders",
-        json={"customer_username": "Alice", "items": [{"product_id": products[1]["id"], "quantity": 1}]},
-    )
-    assert r.status_code == 403
-    assert "unpaid" in r.json()["detail"].lower()
-    # no extra order or balance was created
-    lookup = client.get("/api/customers/alice").json()
-    assert lookup["customer"]["username"] == "alice"  # case-insensitive match
-    assert len(lookup["orders"]) == 1
-    assert lookup["balance"] == pytest.approx(products[0]["price"] * 2)
+def test_balance_accumulates_case_insensitive(client, products, admin_headers):
+    # alice still has an unpaid order from test_checkout_creates_customer; with
+    # the payment due date already passed, a new purchase must be blocked
+    # regardless of username casing.
+    assert client.put(
+        "/api/settings/payment_due_date",
+        json={"key": "payment_due_date", "value": "2020-01-01"},
+        headers=admin_headers,
+    ).status_code == 200
+    try:
+        r = client.post(
+            "/api/orders",
+            json={"customer_username": "Alice", "items": [{"product_id": products[1]["id"], "quantity": 1}]},
+        )
+        assert r.status_code == 403
+        assert "unpaid" in r.json()["detail"].lower()
+        # no extra order or balance was created
+        lookup = client.get("/api/customers/alice").json()
+        assert lookup["customer"]["username"] == "alice"  # case-insensitive match
+        assert len(lookup["orders"]) == 1
+        assert lookup["balance"] == pytest.approx(products[0]["price"] * 2)
+    finally:
+        client.put(
+            "/api/settings/payment_due_date",
+            json={"key": "payment_due_date", "value": ""},
+            headers=admin_headers,
+        )
 
 
 def test_checkout_requires_username(client, products):
@@ -486,7 +499,7 @@ def test_order_uses_special_price_for_weekly_special(client, admin_headers, prod
     assert order["total"] == pytest.approx(2.0)
     assert order["total"] != pytest.approx(normal * 2)
 
-    # settle the tab so the next purchase is allowed (block rule)
+    # settle the tab through the admin reset flow before the next purchase
     assert client.post(
         "/api/customers/special_tester/reset-payment", headers=admin_headers
     ).status_code == 200
@@ -520,30 +533,78 @@ def test_due_date_absent_by_default(client, products):
     assert r.json()["due_date"] is None
 
 
-def test_checkout_blocked_until_marked_paid(client, products, admin_headers):
-    """A user with any unpaid order cannot buy again until they are paid up."""
-    r = client.post(
-        "/api/orders",
-        json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
-    )
-    assert r.status_code == 201
+def test_tab_stays_open_without_due_date(client, products, admin_headers):
+    """Regression for the v1.0.13 due-date change: checkout used to 403 on ANY
+    unpaid order, so a customer could only ever buy once. Without a payment due
+    date - or with one still days away - the tab must stay open and further
+    purchases must be accepted; only an overdue balance blocks."""
+    def buy():
+        return client.post(
+            "/api/orders",
+            json={"customer_username": "tab_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+        )
 
-    r = client.post(
-        "/api/orders",
-        json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
-    )
-    assert r.status_code == 403
-    assert "mark it as paid" in r.json()["detail"]
+    assert buy().status_code == 201
+    assert buy().status_code == 201  # no due date configured -> tab stays open
+    lookup = client.get("/api/customers/tab_tester").json()
+    assert len(lookup["orders"]) == 2
+    assert lookup["balance"] == pytest.approx(products[2]["price"] * 2)
 
-    # mark paid -> purchase allowed again
-    assert client.post(
-        "/api/customers/blocked_tester/reset-payment", headers=admin_headers
+    # a due date set days after the purchase keeps the tab open as well
+    assert client.put(
+        "/api/settings/payment_due_date",
+        json={"key": "payment_due_date", "value": "2099-12-31"},
+        headers=admin_headers,
     ).status_code == 200
-    r = client.post(
-        "/api/orders",
-        json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
-    )
-    assert r.status_code == 201
+    try:
+        assert buy().status_code == 201
+        lookup = client.get("/api/customers/tab_tester").json()
+        assert len(lookup["orders"]) == 3
+    finally:
+        client.put(
+            "/api/settings/payment_due_date",
+            json={"key": "payment_due_date", "value": ""},
+            headers=admin_headers,
+        )
+
+
+def test_checkout_blocked_until_marked_paid(client, products, admin_headers):
+    """Once the payment due date has passed, a user with an unpaid order cannot
+    buy again until the staff settles their balance."""
+    assert client.put(
+        "/api/settings/payment_due_date",
+        json={"key": "payment_due_date", "value": "2020-01-01"},
+        headers=admin_headers,
+    ).status_code == 200
+    try:
+        r = client.post(
+            "/api/orders",
+            json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+        )
+        assert r.status_code == 201
+
+        r = client.post(
+            "/api/orders",
+            json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+        )
+        assert r.status_code == 403
+        assert "mark it as paid" in r.json()["detail"]
+
+        # mark paid -> purchase allowed again
+        assert client.post(
+            "/api/customers/blocked_tester/reset-payment", headers=admin_headers
+        ).status_code == 200
+        r = client.post(
+            "/api/orders",
+            json={"customer_username": "blocked_tester", "items": [{"product_id": products[2]["id"], "quantity": 1}]},
+        )
+        assert r.status_code == 201
+    finally:
+        client.put(
+            "/api/settings/payment_due_date",
+            json={"key": "payment_due_date", "value": ""},
+            headers=admin_headers,
+        )
 
 
 def test_cancel_preserves_previous_state(client, products):
