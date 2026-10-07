@@ -2,6 +2,17 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.19] - 2026-10-07
+
+### Fixed
+- **Atomic stock deduction on checkout** — replaced the vulnerable read-then-decrement pattern in
+  `backend/routers/orders.py::create_order` with a database-backed atomic stock update. This prevents
+  two simultaneous purchases from overselling the final item and creating negative inventory.
+- Added a regression test for concurrent checkout attempts to guard against repeated oversell races.
+
+### Tests
+- All backend tests (38), the full e2e suite (26 steps), ruff, mypy, and JS syntax validation pass.
+
 ## [1.0.18] - 2026-10-07
 
 ### Fixed

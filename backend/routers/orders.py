@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -56,64 +57,79 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
     if not data.items:
         raise HTTPException(status_code=400, detail="Order must contain items")
 
-    customer = get_or_create_customer(db, data.customer_username)
+    with db.begin():
+        customer = get_or_create_customer(db, data.customer_username)
 
-    # Only an OVERDUE balance blocks the next purchase: no due date configured
-    # (or one still in the future) means the tab stays open and orders stack.
-    due = get_due_date(db)
-    if due is not None and due < utcnow():
-        has_unpaid = (
-            db.query(Order)
-            .filter(Order.customer_id == customer.id, Order.status == "pending")
-            .count()
+        # Only an OVERDUE balance blocks the next purchase: no due date configured
+        # (or one still in the future) means the tab stays open and orders stack.
+        due = get_due_date(db)
+        if due is not None and due < utcnow():
+            has_unpaid = (
+                db.query(Order)
+                .filter(Order.customer_id == customer.id, Order.status == "pending")
+                .count()
+            )
+            if has_unpaid:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "The payment due date has passed and your previous order is "
+                        "still unpaid. Ask the staff to mark it as paid before you "
+                        "can buy again."
+                    ),
+                )
+
+        order = Order(
+            status="pending",
+            notes=data.notes,
+            customer_id=customer.id,
+            due_date=get_due_date(db),
         )
-        if has_unpaid:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "The payment due date has passed and your previous order is "
-                    "still unpaid. Ask the staff to mark it as paid before you "
-                    "can buy again."
+        subtotal = 0.0
+        for item in data.items:
+            product = db.get(Product, item.product_id)
+            if not product or not product.is_active:
+                raise HTTPException(
+                    status_code=400, detail=f"Product {item.product_id} not available"
+                )
+
+            result = db.execute(
+                text(
+                    """
+                    UPDATE products
+                    SET stock = stock - :quantity
+                    WHERE id = :product_id AND stock >= :quantity
+                    """
                 ),
+                {"product_id": product.id, "quantity": item.quantity},
+            )
+            if result.rowcount != 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Insufficient stock for '{product.name}' "
+                        f"({product.stock} left)"
+                    ),
+                )
+
+            line_total = product.effective_price * item.quantity
+            subtotal += line_total
+            order.items.append(
+                OrderItem(
+                    product_id=product.id,
+                    product_name=product.name,
+                    quantity=item.quantity,
+                    unit_price=product.effective_price,
+                )
             )
 
-    order = Order(
-        status="pending",
-        notes=data.notes,
-        customer_id=customer.id,
-        due_date=get_due_date(db),
-    )
-    subtotal = 0.0
-    for item in data.items:
-        product = db.get(Product, item.product_id)
-        if not product or not product.is_active:
-            raise HTTPException(
-                status_code=400, detail=f"Product {item.product_id} not available"
-            )
-        if product.stock < item.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient stock for '{product.name}' ({product.stock} left)",
-            )
-        product.stock -= item.quantity
-        line_total = product.effective_price * item.quantity
-        subtotal += line_total
-        order.items.append(
-            OrderItem(
-                product_id=product.id,
-                product_name=product.name,
-                quantity=item.quantity,
-                unit_price=product.effective_price,
-            )
-        )
+        order.subtotal = round(subtotal, 2)
+        order.total = round(subtotal, 2)
 
-    order.subtotal = round(subtotal, 2)
-    order.total = round(subtotal, 2)
-
-    db.add(order)
-    db.commit()
-    db.refresh(order)
-    return order
+        db.add(order)
+        db.flush()
+        db.refresh(order)
+        return order
 
 
 @router.patch("/{order_id}/status", response_model=OrderOut)

@@ -6,6 +6,9 @@ Uses the FastAPI TestClient against a throwaway SQLite database.
 
 import os
 import sys
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -270,6 +273,55 @@ def test_order_rejects_excess_quantity_items(client, products):
         json={"customer_username": "bigcart", "items": items},
     )
     assert r.status_code == 422
+
+
+def test_order_stock_is_not_oversold_under_concurrency(client, admin_headers):
+    from fastapi.testclient import TestClient
+    from main import app
+
+    pid = client.get("/api/products").json()[0]["id"]
+    stock_before = client.get(f"/api/products/{pid}").json()["stock"]
+    barrier = threading.Barrier(2)
+    usernames = [f"race_user_{uuid.uuid4().hex}", f"race_user_{uuid.uuid4().hex}"]
+
+    def buy_once(username: str):
+        barrier.wait()
+        with TestClient(app) as c:
+            return c.post(
+                "/api/orders",
+                json={"customer_username": username, "items": [{"product_id": pid, "quantity": 1}]},
+            )
+
+    try:
+        client.put(
+            f"/api/products/{pid}",
+            json={"stock": 1},
+            headers=admin_headers,
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(buy_once, usernames))
+
+        statuses = [r.status_code for r in results]
+        assert statuses.count(201) == 1
+        assert statuses.count(400) == 1
+        assert client.get(f"/api/products/{pid}").json()["stock"] == 0
+        for username in usernames:
+            lookup = client.get(f"/api/customers/{username}")
+            if lookup.status_code != 200:
+                continue
+            for order in lookup.json()["orders"]:
+                if order["status"] == "pending":
+                    r = client.patch(
+                        f"/api/orders/{order['id']}/status?new_status=cancelled",
+                        headers=admin_headers,
+                    )
+                    assert r.status_code == 200, r.text
+    finally:
+        client.put(
+            f"/api/products/{pid}",
+            json={"stock": stock_before},
+            headers=admin_headers,
+        )
 
 
 def test_disabled_user_token_invalid(client, admin_headers):
