@@ -2,6 +2,17 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.20] - 2026-10-08
+
+### Fixed
+- **Pydantic settings compatibility** — migrated `backend/config.py` from deprecated
+  `class Config` usage to the supported `SettingsConfigDict` API, removing the warning
+  raised under Pydantic v2 without changing runtime behavior.
+
+### Tests
+- All backend tests (43), the full e2e suite (26 steps), ruff, mypy, and JS syntax
+  validation pass.
+
 ## [1.0.19] - 2026-10-07
 
 ### Fixed

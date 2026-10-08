@@ -2,7 +2,7 @@ import os
 import secrets
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _default_secret_key() -> str:
@@ -18,6 +18,8 @@ def _default_secret_key() -> str:
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env")
+
     database_path: str = os.environ.get("DATABASE_PATH", "data/kiosk.db")
     secret_key: str = _default_secret_key()
     algorithm: str = "HS256"
@@ -29,9 +31,6 @@ class Settings(BaseSettings):
         # Docker Compose may pass SECRET_KEY="" when the host env var is
         # unset; never allow an empty signing key.
         return v or secrets.token_urlsafe(48)
-
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()
