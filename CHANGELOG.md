@@ -2,6 +2,20 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.22] - 2026-10-11
+
+### Fixed
+- **Least-privilege CI token permissions** — restricted each CI job's `GITHUB_TOKEN` to
+  `contents: read`, addressing all three CodeQL workflow-permissions alerts.
+
+### Changed
+- Updated backend runtime dependencies to FastAPI 0.142.2 and SQLAlchemy 2.1.3.
+- Updated development tools to Ruff 0.16.10 and mypy 2.4.0.
+
+### Tests
+- All backend tests (44), the full e2e suite (26 steps), Docker + TLS smoke, ruff,
+  mypy, and JS syntax validation pass.
+
 ## [1.0.21] - 2026-10-11
 
 ### Added
