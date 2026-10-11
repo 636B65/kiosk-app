@@ -191,6 +191,15 @@ a token without those scopes gets HTTP 401/403 from the Packages API.
   run it in CI or `docker compose up` locally.
 - `#app` + admin views render via JS; there are no server-side templates.
 
+## Agent skills
+
+Reusable task skills are maintained for GitHub Copilot (`.github/skills/`), Claude Code
+(`.claude/skills/`), and agents that discover the portable `.agents/skills/` directory.
+Keep matching skill names and contents synchronized across these directories. The
+`kiosk-development`, `kiosk-testing`, and `kiosk-release` skills cover common repo work;
+this `AGENTS.md` remains the shared source of project conventions for agents that do not
+load skills.
+
 ## Workflow conventions
 
 - Make changes intentionally and small; run the three checks above.

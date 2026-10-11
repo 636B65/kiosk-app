@@ -2,6 +2,17 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.26] - 2026-10-11
+
+### Added
+- Added synchronized `kiosk-development`, `kiosk-testing`, and `kiosk-release` agent skills
+  for GitHub Copilot, Claude Code, and portable `.agents/skills/` consumers.
+- Documented the skill locations and synchronization rule in `AGENTS.md`.
+
+### Tests
+- Verified skill frontmatter, required skill files, and identical copies across agent
+  directories; backend tests (45), Ruff, mypy, JavaScript syntax, and E2E (28 steps) pass.
+
 ## [1.0.25] - 2026-10-11
 
 ### Changed
