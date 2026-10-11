@@ -43,7 +43,8 @@ sample data. Everything lives in your browser and **resets on reload**.
 - Orders with paid/cancelled statuses and per-order item detail
 - Customers: balances, per-customer stats, monthly history, reset payment
 - Reports with outstanding balance, sales breakdown, customer/product leaderboards,
-  and recent payment insights
+  recent payment insights, and CSV export of inventory, customer balances, and report data
+  (inventory value is estimated using current selling prices, not product cost)
 - User management (admin accounts)
 
 ## Architecture

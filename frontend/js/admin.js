@@ -769,7 +769,10 @@ const Admin = {
         `;
         app.innerHTML = `
             <div class="admin-main">
-                <h2>Reports</h2>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
+                    <h2 style="margin:0;">Reports</h2>
+                    <button class="btn btn-primary" data-action="admin-export-reports-csv">Export CSV</button>
+                </div>
                 <div class="stats-grid">
                     <div class="stat-card"><div class="label">Outstanding Balance</div><div class="value" style="color:var(--warning);">${fmt(summary.outstanding)}</div><div class="sub">${summary.pending_orders} unpaid order(s)</div></div>
                     <div class="stat-card"><div class="label">Today (paid)</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} orders</div></div>
@@ -823,6 +826,15 @@ const Admin = {
                 </div>
             </div>
         `;
+    },
+
+    async exportReportsCsv() {
+        try {
+            await API.download("/reports/export.csv", "kiosk-report.csv");
+            Toast.success("Report exported as CSV");
+        } catch (err) {
+            Toast.error(err.message);
+        }
     },
 
     async renderUsers() {

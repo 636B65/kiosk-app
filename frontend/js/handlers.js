@@ -26,6 +26,7 @@ Actions.register("admin-new-product", () => Admin.openProductModal());
 Actions.register("admin-new-category", () => Admin.openCategoryModal());
 Actions.register("admin-new-user", () => Admin.openUserModal());
 Actions.register("admin-save-settings", () => Admin.saveSettings());
+Actions.register("admin-export-reports-csv", () => Admin.exportReportsCsv());
 
 Actions.register("kiosk-new-order", () => {
     Modal.close();

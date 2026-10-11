@@ -25,6 +25,34 @@ const API = {
     },
 
     get(path) { return this.request(path); },
+    async download(path, filename) {
+        const headers = {};
+        const token = localStorage.getItem("kiosk_token");
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const res = await fetch(`/api${path}`, { headers });
+        if (res.status === 401 && token) {
+            localStorage.removeItem("kiosk_token");
+            localStorage.removeItem("kiosk_user");
+            location.hash = "#admin/login";
+        }
+        if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            const detail = data && data.detail ? data.detail : `Request failed (${res.status})`;
+            throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+
+        const url = URL.createObjectURL(await res.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        const disposition = res.headers.get("Content-Disposition") || "";
+        const serverFilename = disposition.match(/filename="([^"]+)"/)?.[1];
+        link.download = serverFilename || filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
     post(path, body) {
         return this.request(path, { method: "POST", body: JSON.stringify(body) });
     },

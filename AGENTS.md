@@ -107,6 +107,9 @@ tests/e2e/
 - **Stats**: `CustomerStats` = order count, total spent/paid, balance (sum of pending), avg
   order, items bought, first/last order, top item, orders-per-month + spent/month,
   orders-by-weekday, busiest day, next due date. Balance shown in admin = pending total only.
+- **Report exports**: `GET /api/reports/export.csv` is admin-only and exports sales totals,
+  customer pending balances, current inventory/stock value, daily sales, customer/product
+  rankings, and the latest payment. Keep CSV export aligned with the admin Reports view.
 
 ## Backend conventions
 

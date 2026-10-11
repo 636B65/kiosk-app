@@ -426,6 +426,115 @@
             .map((row) => ({ ...row, revenue: Math.round(row.revenue * 100) / 100 }));
     }
 
+    function reportCsvResponse() {
+        const headers = [
+            "section", "period", "record", "id", "name", "count",
+            "quantity", "amount", "unit_price", "stock", "stock_value", "details",
+        ];
+        const rows = [headers];
+        const add = (section, fields = {}) => rows.push(headers.map((key) => fields[key] ?? ""));
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const week = new Date(today);
+        week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
+        const month = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        for (const period of ["today", "yesterday", "week", "month", "all_time"]) {
+            const totals = reportsSummary()[period];
+            add("sales_summary", {
+                period, count: totals.order_count, amount: totals.revenue,
+                details: "paid orders and revenue",
+            });
+        }
+
+        const pending = DB.orders.filter((order) => order.status === "pending");
+        add("outstanding", {
+            record: "store_total", count: pending.length,
+            amount: Math.round(pending.reduce((sum, order) => sum + order.total, 0) * 100) / 100,
+            details: "total pending customer balance",
+        });
+        add("payment_due_date", {
+            record: "store",
+            details: reportsSummary().next_due_date || "not configured",
+        });
+        for (const customer of DB.customers.slice().sort((a, b) => a.username.localeCompare(b.username))) {
+            const orders = pending.filter((order) => order.customer_id === customer.id);
+            const stats = statsFor(customer.id);
+            add("customer_summary", {
+                record: "lifetime", id: customer.id, name: customer.username,
+                count: stats.orders, amount: stats.total_paid,
+                details: "paid orders: " + stats.paid_orders,
+            });
+            add("customer_balance", {
+                record: "pending", id: customer.id, name: customer.username,
+                count: orders.length,
+                amount: Math.round(orders.reduce((sum, order) => sum + order.total, 0) * 100) / 100,
+                details: "pending orders: " + orders.map((order) =>
+                    `#${order.id} due ${order.due_date || "not set"}`).join("; "),
+            });
+        }
+        for (const product of DB.products.slice().sort((a, b) => a.name.localeCompare(b.name))) {
+            const price = effectivePrice(product);
+            add("inventory", {
+                record: product.is_active ? "active" : "inactive",
+                id: product.id, name: product.name, unit_price: price, stock: product.stock,
+                stock_value: Math.round(product.stock * price * 100) / 100,
+                details: "category: " + (categoryOf(product)?.name || "") +
+                    "; value at current selling price",
+            });
+        }
+
+        for (const day of salesByDay(14)) {
+            add("daily_sales", {
+                period: day.day, count: day.orders, amount: day.revenue,
+                details: "paid orders and revenue",
+            });
+        }
+        const insights = customerInsights(20);
+        for (const period of ["today", "week", "month"]) {
+            for (const [index, customer] of insights[period].entries()) {
+                add("top_customers", {
+                    period, record: `rank_${index + 1}`, name: customer.username,
+                    count: customer.orders, amount: customer.spent,
+                });
+            }
+            const start = period === "today" ? today : period === "week" ? week : month;
+            for (const [index, product] of productRows(start, 20).entries()) {
+                add("top_products", {
+                    period, record: `rank_${index + 1}`, name: product.product,
+                    quantity: product.quantity, amount: product.revenue,
+                });
+            }
+        }
+        for (const [index, product] of topProducts(20).entries()) {
+            add("top_products", {
+                period: "all_time", record: `rank_${index + 1}`, name: product.product,
+                quantity: product.quantity, amount: product.revenue,
+            });
+        }
+        if (insights.last_paid) {
+            add("last_payment", {
+                record: "latest", id: insights.last_paid.order_id,
+                name: insights.last_paid.username, amount: insights.last_paid.amount,
+                details: insights.last_paid.paid_at,
+            });
+        }
+
+        const escapeCell = (value) => {
+            const text = String(value);
+            const safe = typeof value === "string" &&
+                text.trimStart().match(/^[=+\-@\t\r]/) ? "'" + text : text;
+            return `"${safe.replace(/"/g, '""')}"`;
+        };
+        const body = "\uFEFF" + rows.map((row) => row.map(escapeCell).join(",")).join("\r\n");
+        return new Response(body, {
+            headers: {
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": 'attachment; filename="kiosk-report-demo.csv"',
+            },
+        });
+    }
+
     function userOut(u) {
         return {
             id: u.id, username: u.username, full_name: u.full_name || "",
@@ -773,6 +882,10 @@
             requireAdmin(init);
             return reportsSummary();
         }
+        if (path === "/reports/export.csv" && method === "GET") {
+            requireAdmin(init);
+            return reportCsvResponse();
+        }
         if (path === "/reports/top-products" && method === "GET") {
             requireAdmin(init);
             return topProducts(Number(query.get("limit")) || 10);
@@ -817,6 +930,9 @@
         const delay = 40 + Math.random() * 60;
         return handle(path, query, method, init)
             .then((result) => {
+                if (result instanceof Response) {
+                    return new Promise((resolve) => setTimeout(() => resolve(result), delay));
+                }
                 const status = typeof result.__status === "number" ? result.__status : HTTP.OK;
                 const data = typeof result.__status === "number" ? result.__data : result;
                 return new Promise((resolve) => setTimeout(() => {

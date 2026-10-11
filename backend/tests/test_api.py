@@ -4,6 +4,8 @@ Run with:  python -m pytest backend/tests -v
 Uses the FastAPI TestClient against a throwaway SQLite database.
 """
 
+import csv
+import io
 import os
 import sys
 import threading
@@ -525,6 +527,76 @@ def test_reports_reflect_paid_after_reset(client, admin_headers):
     assert summ["today"]["revenue"] > 0
     top = client.get("/api/reports/top-products?limit=3", headers=admin_headers).json()
     assert len(top) <= 3
+
+
+def test_reports_csv_exports_stock_balances_and_report_statistics(
+    client, admin_headers
+):
+    product_name = '=HYPERLINK("https://example.test"), Item'
+    product_response = client.post(
+        "/api/products",
+        headers=admin_headers,
+        json={"name": product_name, "price": 3.25, "stock": 10},
+    )
+    assert product_response.status_code == 201, product_response.text
+    product_id = product_response.json()["id"]
+
+    for status in ("pending", "paid"):
+        order_response = client.post(
+            "/api/orders",
+            json={
+                "customer_username": "csv_export_customer",
+                "items": [{"product_id": product_id, "quantity": 1}],
+            },
+        )
+        assert order_response.status_code == 201, order_response.text
+        if status == "paid":
+            paid = client.patch(
+                f"/api/orders/{order_response.json()['id']}/status?new_status=paid",
+                headers=admin_headers,
+            )
+            assert paid.status_code == 200
+
+    unauthorized = client.get("/api/reports/export.csv")
+    assert unauthorized.status_code == 401
+
+    response = client.get("/api/reports/export.csv", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["content-disposition"].startswith(
+        'attachment; filename="kiosk-report-'
+    )
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+
+    customer_rows = [
+        row for row in rows
+        if row["section"] == "customer_balance"
+        and row["name"] == "csv_export_customer"
+    ]
+    assert len(customer_rows) == 1
+    assert customer_rows[0]["count"] == "1"
+    assert float(customer_rows[0]["amount"]) == pytest.approx(3.25)
+
+    inventory = next(
+        row for row in rows
+        if row["section"] == "inventory" and row["id"] == str(product_id)
+    )
+    assert inventory["name"] == "'" + product_name
+    assert inventory["stock"] == "8"
+    assert float(inventory["stock_value"]) == pytest.approx(26.0)
+    assert any(row["section"] == "sales_summary" for row in rows)
+    assert any(row["section"] == "customer_summary" for row in rows)
+    assert any(row["section"] == "payment_due_date" for row in rows)
+    assert any(
+        row["section"] == "top_customers"
+        and row["name"] == "csv_export_customer"
+        for row in rows
+    )
+    assert any(
+        row["section"] == "last_payment"
+        and row["name"] == "csv_export_customer"
+        for row in rows
+    )
 
 
 def test_order_items_endpoint(client, admin_headers):

@@ -2,6 +2,17 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.27] - 2026-10-11
+
+### Added
+- Admin Reports now exports a UTF-8 CSV containing paid sales summaries, daily sales,
+  per-customer outstanding balances, product inventory and stock value, customer/product
+  rankings, and the latest payment. CSV export is also supported by the browser demo.
+
+### Tests
+- All backend tests (46), E2E (29 steps), Ruff, mypy, JavaScript syntax, and CSV content,
+  authorization, and download checks pass.
+
 ## [1.0.26] - 2026-10-11
 
 ### Added

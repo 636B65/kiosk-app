@@ -438,6 +438,24 @@ server.listen(PORT, async () => {
       return "reports ok";
     });
 
+    await step("admin: export report statistics as CSV", async () => {
+      const downloadPromise = page.waitForEvent("download");
+      await page.locator('[data-action="admin-export-reports-csv"]').click();
+      const download = await downloadPromise;
+      if (!download.suggestedFilename().startsWith("kiosk-report-") ||
+          !download.suggestedFilename().endsWith(".csv")) {
+        throw new Error("unexpected export filename: " + download.suggestedFilename());
+      }
+      const stream = await download.createReadStream();
+      let content = "";
+      for await (const chunk of stream) content += chunk.toString("utf8");
+      if (!content.includes("customer_balance") || !content.includes("inventory") ||
+          !content.includes("top_products")) {
+        throw new Error("CSV missing customer balances, stock, or product insights");
+      }
+      return "downloaded report CSV with balances, inventory, and insights";
+    });
+
     await step("admin: customer lookup matches after reset", async () => {
       await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
       await page.waitForSelector(".product-card");

@@ -1,8 +1,11 @@
+import csv
+import io
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
+from starlette.responses import Response
 
 from database import get_db
 from due_dates import get_due_date
@@ -66,9 +69,9 @@ def top_customers_for_period(
 
 
 def top_products_for_period(
-    db: Session, start: datetime, limit: int
+    db: Session, start: datetime | None, limit: int
 ) -> list[dict]:
-    rows = (
+    query = (
         db.query(
             OrderItem.product_name,
             func.sum(OrderItem.quantity).label("quantity"),
@@ -77,16 +80,17 @@ def top_products_for_period(
             ).label("revenue"),
         )
         .join(Order, Order.id == OrderItem.order_id)
-        .filter(Order.status == "paid", Order.created_at >= start)
+        .filter(Order.status == "paid")
         .group_by(OrderItem.product_name)
         .order_by(
             func.sum(OrderItem.quantity).desc(),
             func.sum(OrderItem.unit_price * OrderItem.quantity).desc(),
             OrderItem.product_name.asc(),
         )
-        .limit(limit)
-        .all()
     )
+    if start:
+        query = query.filter(Order.created_at >= start)
+    rows = query.limit(limit).all()
     return [
         {
             "product": row.product_name,
@@ -216,3 +220,249 @@ def sales_by_day(
     return [
         {"day": r.day, "orders": r[1], "revenue": round(r[2], 2)} for r in rows
     ]
+
+
+@router.get("/export.csv")
+def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    now = utcnow()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week = today - timedelta(days=today.weekday())
+    month = today.replace(day=1)
+    last_14_days = now - timedelta(days=14)
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "section",
+            "period",
+            "record",
+            "id",
+            "name",
+            "count",
+            "quantity",
+            "amount",
+            "unit_price",
+            "stock",
+            "stock_value",
+            "details",
+        ]
+    )
+
+    def write_row(
+        section,
+        period="",
+        record="",
+        record_id="",
+        name="",
+        count="",
+        quantity="",
+        amount="",
+        unit_price="",
+        stock="",
+        stock_value="",
+        details="",
+    ):
+        values = [
+            section,
+            period,
+            record,
+            record_id,
+            name,
+            count,
+            quantity,
+            amount,
+            unit_price,
+            stock,
+            stock_value,
+            details,
+        ]
+        safe_values = [
+            "'" + value
+            if isinstance(value, str)
+            and value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r"))
+            else value
+            for value in values
+        ]
+        writer.writerow(safe_values)
+
+    for period, start, end in (
+        ("today", today, None),
+        ("yesterday", today - timedelta(days=1), today),
+        ("last_7_days", now - timedelta(days=7), None),
+        ("last_30_days", now - timedelta(days=30), None),
+        ("all_time", None, None),
+    ):
+        totals = revenue_for_period(db, start=start, end=end)
+        write_row(
+            "sales_summary",
+            period=period,
+            count=totals["order_count"],
+            amount=totals["revenue"],
+            details="paid orders and revenue",
+        )
+
+    pending_orders = (
+        db.query(Order)
+        .filter(Order.status == "pending")
+        .order_by(Order.created_at, Order.id)
+        .all()
+    )
+    pending_by_customer = {}
+    for order in pending_orders:
+        if order.customer_id is None:
+            continue
+        pending_by_customer.setdefault(order.customer_id, []).append(order)
+
+    write_row(
+        "outstanding",
+        record="store_total",
+        count=len(pending_orders),
+        amount=outstanding_total(db),
+        details="total pending customer balance",
+    )
+    write_row(
+        "payment_due_date",
+        record="store",
+        details=get_due_date(db) or "not configured",
+    )
+    paid_by_customer = {
+        row.customer_id: (
+            row.order_count,
+            row.paid_orders,
+            round(row.paid_total or 0.0, 2),
+        )
+        for row in db.query(
+            Order.customer_id,
+            func.count(Order.id).label("order_count"),
+            func.sum(case((Order.status == "paid", 1), else_=0)).label("paid_orders"),
+            func.coalesce(
+                func.sum(case((Order.status == "paid", Order.total), else_=0.0)),
+                0.0,
+            ).label("paid_total"),
+        )
+        .group_by(Order.customer_id)
+        .all()
+        if row.customer_id is not None
+    }
+    for customer in db.query(Customer).order_by(Customer.username).all():
+        orders = pending_by_customer.get(customer.id, [])
+        total_orders, paid_orders, paid_total = paid_by_customer.get(
+            customer.id, (0, 0, 0.0)
+        )
+        write_row(
+            "customer_summary",
+            record="lifetime",
+            record_id=customer.id,
+            name=customer.username,
+            count=total_orders,
+            amount=paid_total,
+            details=f"paid orders: {paid_orders}",
+        )
+        write_row(
+            "customer_balance",
+            record="pending",
+            record_id=customer.id,
+            name=customer.username,
+            count=len(orders),
+            amount=round(sum(order.total for order in orders), 2),
+            details="pending orders: "
+            + "; ".join(
+                f"#{order.id} due {order.due_date.isoformat() if order.due_date else 'not set'}"
+                for order in orders
+            ),
+        )
+
+    for product in db.query(Product).order_by(Product.name, Product.id).all():
+        unit_price = product.effective_price
+        category = product.category.name if product.category else ""
+        write_row(
+            "inventory",
+            record="active" if product.is_active else "inactive",
+            record_id=product.id,
+            name=product.name,
+            unit_price=unit_price,
+            stock=product.stock,
+            stock_value=round(product.stock * unit_price, 2),
+            details=f"category: {category}; value at current selling price",
+        )
+
+    for day in (
+        db.query(
+            func.date(Order.created_at).label("day"),
+            func.count(Order.id),
+            func.coalesce(func.sum(Order.total), 0.0),
+        )
+        .filter(Order.status == "paid", Order.created_at >= last_14_days)
+        .group_by(func.date(Order.created_at))
+        .order_by(func.date(Order.created_at))
+        .all()
+    ):
+        write_row(
+            "daily_sales",
+            period=day.day,
+            count=day[1],
+            amount=round(day[2], 2),
+            details="paid orders and revenue",
+        )
+
+    for period, start in (("today", today), ("week", week), ("month", month)):
+        for rank, customer in enumerate(top_customers_for_period(db, start, 20), 1):
+            write_row(
+                "top_customers",
+                period=period,
+                record=f"rank_{rank}",
+                name=customer["username"],
+                count=customer["orders"],
+                amount=customer["spent"],
+            )
+        for rank, product in enumerate(top_products_for_period(db, start, 20), 1):
+            write_row(
+                "top_products",
+                period=period,
+                record=f"rank_{rank}",
+                name=product["product"],
+                quantity=product["quantity"],
+                amount=product["revenue"],
+            )
+    for rank, product in enumerate(top_products_for_period(db, None, 20), 1):
+        write_row(
+            "top_products",
+            period="all_time",
+            record=f"rank_{rank}",
+            name=product["product"],
+            quantity=product["quantity"],
+            amount=product["revenue"],
+        )
+
+    latest_payment = (
+        db.query(
+            Customer.username,
+            Order.id,
+            Order.total,
+            func.coalesce(Order.completed_at, Order.created_at).label("paid_at"),
+        )
+        .join(Order, Order.customer_id == Customer.id)
+        .filter(Order.status == "paid")
+        .order_by(
+            func.coalesce(Order.completed_at, Order.created_at).desc(),
+            Order.id.desc(),
+        )
+        .first()
+    )
+    if latest_payment:
+        write_row(
+            "last_payment",
+            record="latest",
+            record_id=latest_payment.id,
+            name=latest_payment.username,
+            amount=round(latest_payment.total, 2),
+            details=latest_payment.paid_at.isoformat(),
+        )
+
+    filename = f"kiosk-report-{now:%Y-%m-%d}.csv"
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
