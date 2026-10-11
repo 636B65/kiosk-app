@@ -2,7 +2,6 @@ services:
   backend:
     build: ./backend
     image: kiosk/backend
-    container_name: kiosk-backend
     ports:
       # Bind to host loopback only. The backend must NOT be reachable from the
       # LAN/WAN: it is proxied to the frontend over Docker's internal network
@@ -27,7 +26,6 @@ services:
   frontend:
     build: ./frontend
     image: kiosk/frontend
-    container_name: kiosk-frontend
     ports:
       - "80:80"
       - "443:443"

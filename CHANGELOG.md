@@ -2,6 +2,21 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.28] - 2026-10-11
+
+### Added
+- Added an opt-in high-traffic Docker Compose mode with PostgreSQL, Redis caching,
+  a TLS Nginx load balancer, and scalable frontend/API replicas. SQLite remains the
+  default deployment.
+- Added guarded SQLite ↔ PostgreSQL data-copy tooling and documented switching
+  between deployment modes.
+- Updated the architecture diagram and sales presentation to compare both modes.
+
+### Tests
+- All backend tests (47), E2E (29 steps), Ruff, mypy, JavaScript syntax, both
+  Compose configurations, database-copy regression checks, and architecture/PDF
+  validations pass.
+
 ## [1.0.27] - 2026-10-11
 
 ### Added

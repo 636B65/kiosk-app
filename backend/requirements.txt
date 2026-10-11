@@ -6,3 +6,5 @@ pydantic-settings==2.15.0
 bcrypt==5.0.0
 pyjwt==2.15.1
 python-multipart==0.0.32
+psycopg[binary]==3.2.10
+redis==6.4.0

@@ -72,6 +72,14 @@
     .quote{max-width:940px;margin:25px 0;font-size:clamp(2rem,4.5vw,4.1rem);font-weight:780;line-height:1.1;letter-spacing:-.05em}
     .quote em{color:var(--mint);font-style:normal}
     .architecture{width:100%;border:1px solid #ffffff20;border-radius:18px;box-shadow:0 25px 80px #0005}
+    .mode-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:32px}
+    .mode-card{padding:24px;border:1px solid #ffffff24;border-radius:20px;background:#ffffff08}
+    .mode-card.simple{border-color:#61e6b855}.mode-card.scale{border-color:#54d5ed66}
+    .mode-card h3{margin:10px 0 12px}.mode-card p{color:var(--muted);line-height:1.55}
+    .mode-card ul{margin:0;padding-left:20px;color:#d2dcec;line-height:1.8}
+    .mode-label{color:var(--mint);font-size:11px;font-weight:850;letter-spacing:.14em;text-transform:uppercase}
+    .mode-card.scale .mode-label{color:var(--cyan)}
+    .mode-note{margin-top:22px;padding:16px 18px;border-left:3px solid var(--gold);background:#f8c76b0c;color:#d2dcec;line-height:1.55}
     .closing{padding:35px;border:1px solid #61e6b84d;border-radius:27px;background:linear-gradient(120deg,#61e6b814,#54d5ed10,#a78bfa12)}
     .closing-links{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
     .cta{display:inline-block;padding:13px 19px;border-radius:999px;background:linear-gradient(110deg,var(--mint),var(--cyan));color:#06202a;font-weight:850;text-decoration:none}
@@ -82,7 +90,7 @@
     .counter{min-width:60px;text-align:center;color:#b3bfd3;font-size:12px;font-variant-numeric:tabular-nums}
     .progress{position:fixed;z-index:7;inset:auto 0 0;height:3px;background:#ffffff13}
     .progress span{display:block;width:12.5%;height:100%;background:linear-gradient(90deg,var(--mint),var(--cyan),var(--violet));transition:width .25s ease}
-    @media(max-width:800px){.slide{padding:100px 7vw 90px}.grid{grid-template-columns:1fr 1fr}.grid.two{gap:14px}.split{grid-template-columns:1fr;gap:32px}.hero-orbit{right:8vw;top:auto;bottom:17vh;width:92px;height:92px;border-radius:27px}.hero-orbit svg{width:55px}.hero:after{top:auto;bottom:5vh;width:65vw}.metric-row{grid-template-columns:1fr 1fr}.top-actions a:first-child{display:none}}
+    @media(max-width:800px){.slide{padding:100px 7vw 90px}.grid{grid-template-columns:1fr 1fr}.grid.two,.mode-grid{grid-template-columns:1fr;gap:14px}.split{grid-template-columns:1fr;gap:32px}.hero-orbit{right:8vw;top:auto;bottom:17vh;width:92px;height:92px;border-radius:27px}.hero-orbit svg{width:55px}.hero:after{top:auto;bottom:5vh;width:65vw}.metric-row{grid-template-columns:1fr 1fr}.top-actions a:first-child{display:none}}
     @media(max-width:520px){.grid,.grid.two{grid-template-columns:1fr}.card{min-height:auto}.hero-meta{max-width:300px}.mockup{transform:none}.metric-row{grid-template-columns:1fr 1fr}.slide{min-height:100svh}.topbar{padding-inline:5vw}}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
     @media print{
@@ -201,19 +209,40 @@
         <div class="closing">
           <div class="eyebrow">Built for your own environment</div>
           <h3 style="font-size:30px;margin:20px 0 13px">Your shop. Your data. Your deployment.</h3>
-          <p class="muted" style="line-height:1.65">Run the app with Docker Compose and keep store data in a local SQLite file. The documented runtime does not make outbound network calls; online access is needed to build or obtain container images.</p>
-          <div class="pill" style="display:inline-block;margin-top:8px">Self-hosted · Docker Compose · SQLite</div>
+          <p class="muted" style="line-height:1.65">Run the default app with Docker Compose and a local SQLite file. When traffic calls for it, opt into the PostgreSQL + Redis deployment. The documented runtime does not make outbound network calls; online access is needed to build or obtain container images.</p>
+          <div class="pill" style="display:inline-block;margin-top:8px">Self-hosted · Docker Compose · SQLite by default</div>
         </div>
       </div>
     </section>
 
     <section class="slide">
       <div class="slide-inner">
-        <div class="eyebrow">Simple on the surface. Thoughtful underneath.</div>
-        <h2>Made to be run,<br><span class="gradient-text">not just demoed.</span></h2>
-        <p class="lead">A lightweight web stack, persistent store data, HTTPS at the frontend, automatic database migrations and an offline deployment path.</p>
-        <img class="architecture" src="kiosk-architecture.svg" alt="Architecture diagram showing customer and staff flows through kiosk and admin web apps, NGINX TLS, FastAPI, and SQLite">
-        <p class="footnote">The GitHub Pages demo uses an in-browser mock with sample data. A production deployment uses the backend API and its persistent database.</p>
+        <div class="eyebrow">A deployment path that grows with the store</div>
+        <h2>Start simple.<br><span class="gradient-text">Scale when you need to.</span></h2>
+        <p class="lead">The high-traffic setup is an opt-in mode—not a prerequisite for running the kiosk.</p>
+        <div class="mode-grid">
+          <article class="mode-card simple">
+            <span class="mode-label">Default · simple mode</span>
+            <h3>One store, one host</h3>
+            <p>The existing single-host Compose deployment stays lightweight and straightforward.</p>
+            <ul><li>SQLite database file</li><li>One FastAPI service and Nginx frontend</li><li>No Redis or PostgreSQL required</li></ul>
+          </article>
+          <article class="mode-card scale">
+            <span class="mode-label">Optional · high-traffic mode</span>
+            <h3>More capacity on the same host</h3>
+            <p>Choose the high-traffic Compose mode when requests or API work justify more replicas.</p>
+            <ul><li>Nginx load balancer, scalable Nginx and FastAPI replicas</li><li>Shared PostgreSQL database and Redis catalog cache</li><li>Product images available through shared storage</li></ul>
+          </article>
+        </div>
+        <p class="mode-note"><strong>Keep your data when changing modes.</strong> Copy SQLite to PostgreSQL when opting in, or export PostgreSQL back to SQLite before returning to simple mode. Stop writes and back up first. This Compose setup scales on one host; it is not a multi-host cluster.</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="eyebrow">System architecture · default and high-traffic modes</div>
+        <img class="architecture" src="kiosk-architecture.svg" alt="Architecture diagram comparing the default single-host SQLite deployment with optional load-balanced Nginx and FastAPI replicas, PostgreSQL, Redis and bidirectional database migration">
+        <p class="footnote">The GitHub Pages demo uses an in-browser mock with sample data. High-traffic mode is optional and requires explicit database migration before switching.</p>
       </div>
     </section>
 

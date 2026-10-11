@@ -1,200 +1,131 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1000" role="img" aria-labelledby="title desc">
-  <title id="title">Kiosk App system architecture</title>
-  <desc id="desc">A five-lane view of people and devices, kiosk and admin web apps, the TLS edge, FastAPI services, and SQLite persistence with barcode-to-cart flow.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 950" role="img" aria-labelledby="title desc">
+  <title id="title">Kiosk App deployment modes</title>
+  <desc id="desc">Side-by-side comparison of the default single-host deployment using Nginx, FastAPI and SQLite, and an optional high-traffic deployment using an Nginx load balancer, multiple Nginx and FastAPI replicas, PostgreSQL and Redis. SQLite and PostgreSQL data can be migrated in either direction.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#10172b"/>
       <stop offset="1" stop-color="#20294a"/>
     </linearGradient>
-    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#8b5cf6"/>
-      <stop offset="1" stop-color="#22d3ee"/>
-    </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="7" stdDeviation="8" flood-color="#050916" flood-opacity=".28"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#050916" flood-opacity=".28"/>
     </filter>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
       <path d="M0 0L10 5L0 10z" fill="#91a4ca"/>
     </marker>
-    <marker id="gold-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10z" fill="#f7c66b"/>
-    </marker>
     <style>
       text{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-      .lane-title{font-size:15px;font-weight:800;letter-spacing:1.7px;fill:#b8c5e1}
+      .title{font-size:34px;font-weight:850;fill:#fff}
+      .subtitle{font-size:15px;fill:#aebbd5}
+      .panel-title{font-size:14px;font-weight:850;letter-spacing:1.7px}
       .card-title{font-size:17px;font-weight:800;fill:#f8faff}
       .body{font-size:13px;fill:#d4deef}
       .small{font-size:12px;fill:#9eacc8}
-      .wire{fill:none;stroke:#91a4ca;stroke-width:2.4;marker-end:url(#arrow);opacity:.82}
-      .gold-wire{fill:none;stroke:#f7c66b;stroke-width:2.5;marker-end:url(#gold-arrow)}
+      .wire{fill:none;stroke:#91a4ca;stroke-width:2.4;marker-end:url(#arrow);opacity:.9}
       .card{filter:url(#shadow);stroke-width:1.3}
     </style>
   </defs>
-  <rect width="1680" height="1000" fill="url(#bg)"/>
-  <circle cx="1510" cy="30" r="250" fill="#8b5cf6" opacity=".08"/>
-  <circle cx="120" cy="920" r="290" fill="#22d3ee" opacity=".06"/>
-  <text x="58" y="62" fill="#a5b4fc" font-size="13" font-weight="800" letter-spacing="3">KIOSK APP · SYSTEM MAP</text>
-  <text x="58" y="112" fill="#ffffff" font-size="35" font-weight="850">A simple path from scan to sale</text>
-  <text x="58" y="145" fill="#aebbd5" font-size="16">Self-service shopping, staff controls, barcode lookup and persistent store data.</text>
-  <rect x="1435" y="64" width="185" height="42" rx="21" fill="#263453" stroke="#435477"/>
-  <circle cx="1460" cy="85" r="6" fill="#44d7a8"/>
-  <text x="1476" y="90" fill="#dce7f7" font-size="12" font-weight="750" letter-spacing="1.2">SELF-HOSTED</text>
+  <rect width="1680" height="950" fill="url(#bg)"/>
+  <circle cx="1530" cy="20" r="230" fill="#8b5cf6" opacity=".08"/>
+  <circle cx="110" cy="920" r="230" fill="#22d3ee" opacity=".05"/>
+  <text x="55" y="58" fill="#a5b4fc" font-size="12" font-weight="800" letter-spacing="3">KIOSK APP · DEPLOYMENT OPTIONS</text>
+  <text class="title" x="55" y="106">One shop. Two ways to scale.</text>
+  <text class="subtitle" x="55" y="136">Begin with the simple default. Opt into shared services and replicas only when traffic needs them.</text>
 
-  <!-- Five architecture lanes -->
+  <rect x="40" y="175" width="785" height="690" rx="22" fill="#44d7a8" opacity=".045" stroke="#44d7a8" stroke-opacity=".4"/>
+  <rect x="845" y="175" width="795" height="690" rx="22" fill="#22d3ee" opacity=".045" stroke="#22d3ee" stroke-opacity=".5"/>
+  <text class="panel-title" x="72" y="220" fill="#72f0c3">SIMPLE MODE · DEFAULT</text>
+  <text class="small" x="72" y="246">Single host · plain Compose · no Redis or PostgreSQL required</text>
+  <text class="panel-title" x="877" y="220" fill="#67e8f9">HIGH-TRAFFIC MODE · OPTIONAL</text>
+  <text class="small" x="877" y="246">Selected with HIGH_TRAFFIC=1 · replicas share data services</text>
+
   <g>
-    <rect x="40" y="188" width="250" height="752" rx="20" fill="#ffffff" opacity=".035" stroke="#8190ad" stroke-opacity=".22"/>
-    <rect x="305" y="188" width="360" height="752" rx="20" fill="#44d7a8" opacity=".045" stroke="#44d7a8" stroke-opacity=".25"/>
-    <rect x="680" y="188" width="205" height="752" rx="20" fill="#c084fc" opacity=".055" stroke="#c084fc" stroke-opacity=".3"/>
-    <rect x="900" y="188" width="350" height="752" rx="20" fill="#60a5fa" opacity=".05" stroke="#60a5fa" stroke-opacity=".3"/>
-    <rect x="1265" y="188" width="375" height="752" rx="20" fill="#f7c66b" opacity=".045" stroke="#f7c66b" stroke-opacity=".25"/>
-    <text class="lane-title" x="62" y="222">01 · PEOPLE + DEVICES</text>
-    <text class="lane-title" x="327" y="222">02 · WEB EXPERIENCES</text>
-    <text class="lane-title" x="702" y="222">03 · EDGE / TLS</text>
-    <text class="lane-title" x="922" y="222">04 · APPLICATION</text>
-    <text class="lane-title" x="1287" y="222">05 · PERSISTENCE</text>
+    <path class="wire" d="M300 345H390"/>
+    <path class="wire" d="M420 345H370V505H360"/>
+    <path class="wire" d="M585 390V465"/>
+    <path class="wire" d="M585 580V665"/>
+    <path class="wire" d="M220 580V665"/>
+
+    <path class="wire" d="M1080 345H1180"/>
+    <path class="wire" d="M1180 345H1145V520H1140"/>
+    <path class="wire" d="M1380 390V465"/>
+    <path class="wire" d="M1380 580V665"/>
+    <path class="wire" d="M1240 520H1190V620H1010V665"/>
   </g>
 
-  <!-- Connectors sit behind the component cards -->
-  <g>
-    <path class="wire" d="M262 337H328"/>
-    <path class="gold-wire" d="M262 493H328"/>
-    <path class="wire" d="M262 691H328"/>
-    <path class="wire" d="M642 352H714"/>
-    <path class="wire" d="M642 587H714V510H714"/>
-    <path class="wire" d="M860 486H932"/>
-    <path class="wire" d="M1080 397V418"/>
-    <path class="wire" d="M1080 536V557"/>
-    <path class="wire" d="M1080 675V696"/>
-    <path class="wire" d="M1217 465H1292"/>
-    <path class="gold-wire" d="M1217 604H1292"/>
-    <path class="wire" d="M1217 744H1292"/>
-    <path d="M500 421V739" fill="none" stroke="#f7c66b" stroke-width="1.7" stroke-dasharray="6 6" opacity=".75"/>
-    <text x="512" y="731" fill="#f7c66b" font-size="11" font-weight="700">DEMO MOCK</text>
+  <g class="card">
+    <rect x="80" y="300" width="220" height="90" rx="15" fill="#173e3c" stroke="#44d7a8"/>
+    <text class="card-title" x="190" y="337" text-anchor="middle">Customers + staff</text>
+    <text class="small" x="190" y="365" text-anchor="middle">Kiosk + admin web</text>
+  </g>
+  <g class="card">
+    <rect x="420" y="300" width="330" height="90" rx="15" fill="#33244b" stroke="#c084fc"/>
+    <text class="card-title" x="585" y="337" text-anchor="middle">NGINX · HTTPS</text>
+    <text class="small" x="585" y="365" text-anchor="middle">Serves frontend · proxies /api</text>
+  </g>
+  <g class="card">
+    <rect x="80" y="465" width="280" height="115" rx="15" fill="#173e3c" stroke="#44d7a8"/>
+    <text x="100" y="496" fill="#72f0c3" font-size="11" font-weight="800" letter-spacing="1.2">WEB APPLICATION</text>
+    <text class="card-title" x="100" y="528">Kiosk + admin UI</text>
+    <text class="small" x="100" y="555">Static vanilla JS files</text>
+  </g>
+  <g class="card">
+    <rect x="420" y="465" width="330" height="115" rx="15" fill="#1c3151" stroke="#60a5fa"/>
+    <text x="442" y="496" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.2">API APPLICATION</text>
+    <text class="card-title" x="442" y="528">FastAPI · one instance</text>
+    <text class="small" x="442" y="555">Orders · inventory · reports</text>
+  </g>
+  <g class="card">
+    <rect x="80" y="665" width="280" height="105" rx="15" fill="#292e3c" stroke="#8d9ab3"/>
+    <text x="100" y="697" fill="#c6d1e6" font-size="11" font-weight="800" letter-spacing="1.2">PERSISTENT FILES</text>
+    <text class="card-title" x="100" y="730">Product images</text>
+    <text class="small" x="100" y="753">Shared local data volume</text>
+  </g>
+  <g class="card">
+    <rect x="420" y="665" width="330" height="105" rx="15" fill="#40331e" stroke="#f7c66b"/>
+    <text x="442" y="697" fill="#f7c66b" font-size="11" font-weight="800" letter-spacing="1.2">DATABASE</text>
+    <text class="card-title" x="442" y="730">SQLite file</text>
+    <text class="small" x="442" y="753">Startup schema migrations</text>
   </g>
 
-  <!-- People and devices -->
   <g class="card">
-    <rect x="62" y="270" width="200" height="126" rx="16" fill="#173e3c" stroke="#44d7a8"/>
-    <circle cx="92" cy="302" r="13" fill="#44d7a8" opacity=".2"/>
-    <path d="M92 295a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm-9 19c0-5 4-8 9-8s9 3 9 8" fill="none" stroke="#72f0c3" stroke-width="2"/>
-    <text class="card-title" x="116" y="307">Customer</text>
-    <text class="body" x="80" y="345">Browse · scan · checkout</text>
-    <text class="small" x="80" y="370">Touchscreen shopper</text>
+    <rect x="880" y="300" width="200" height="90" rx="15" fill="#173e3c" stroke="#44d7a8"/>
+    <text class="card-title" x="980" y="337" text-anchor="middle">Customers + staff</text>
+    <text class="small" x="980" y="365" text-anchor="middle">HTTPS clients</text>
   </g>
   <g class="card">
-    <rect x="62" y="425" width="200" height="136" rx="16" fill="#40331e" stroke="#f7c66b"/>
-    <rect x="80" y="448" width="30" height="25" rx="4" fill="none" stroke="#f7c66b" stroke-width="2"/>
-    <path d="M85 453v15m5-15v15m5-15v15m5-15v15m5-15v15" stroke="#f7c66b" stroke-width="1.5"/>
-    <text class="card-title" x="120" y="466">Barcode scanner</text>
-    <text class="body" x="80" y="505">USB / Bluetooth HID</text>
-    <text class="small" x="80" y="530">Code + Enter · repeat to add</text>
+    <rect x="1180" y="300" width="400" height="90" rx="15" fill="#33244b" stroke="#c084fc"/>
+    <text x="1380" y="337" fill="#d8b4fe" font-size="11" font-weight="800" letter-spacing="1.2" text-anchor="middle">NGINX LOAD BALANCER · TLS</text>
+    <text class="small" x="1380" y="365" text-anchor="middle">Distributes web and API requests to replicas</text>
   </g>
   <g class="card">
-    <rect x="62" y="625" width="200" height="132" rx="16" fill="#1c3151" stroke="#60a5fa"/>
-    <circle cx="96" cy="659" r="14" fill="#60a5fa" opacity=".2"/>
-    <path d="M89 659h14m-7-7v14" stroke="#92c4ff" stroke-width="2"/>
-    <text class="card-title" x="120" y="665">Store staff</text>
-    <text class="body" x="80" y="704">Manage products + orders</text>
-    <text class="small" x="80" y="729">Settle tabs · view reports</text>
-  </g>
-
-  <!-- Web experiences -->
-  <g class="card">
-    <rect x="328" y="270" width="314" height="164" rx="16" fill="#173e3c" stroke="#44d7a8"/>
-    <text x="350" y="303" fill="#72f0c3" font-size="11" font-weight="800" letter-spacing="1.5">CUSTOMER KIOSK</text>
-    <text class="card-title" x="350" y="333">Shop at your own pace</text>
-    <text class="body" x="350" y="364">Catalog · cart · user lookup</text>
-    <text class="body" x="350" y="386">Scan code → match product → cart</text>
-    <text class="small" x="350" y="414">Vanilla JS · local cart persistence</text>
+    <rect x="880" y="465" width="260" height="115" rx="15" fill="#173e3c" stroke="#44d7a8"/>
+    <text x="900" y="496" fill="#72f0c3" font-size="11" font-weight="800" letter-spacing="1.2">STATIC FRONTEND</text>
+    <text class="card-title" x="900" y="528">NGINX × N</text>
+    <text class="small" x="900" y="555">Replicated web servers</text>
   </g>
   <g class="card">
-    <rect x="328" y="508" width="314" height="160" rx="16" fill="#1c3151" stroke="#60a5fa"/>
-    <text x="350" y="541" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.5">ADMIN PANEL</text>
-    <text class="card-title" x="350" y="571">Keep the store in control</text>
-    <text class="body" x="350" y="602">Products · barcodes · weekly specials</text>
-    <text class="body" x="350" y="624">Orders · customers · sales insights</text>
-    <text class="small" x="350" y="650">Admin actions protected by JWT auth</text>
+    <rect x="1240" y="465" width="340" height="115" rx="15" fill="#1c3151" stroke="#60a5fa"/>
+    <text x="1262" y="496" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.2">APPLICATION REPLICAS</text>
+    <text class="card-title" x="1262" y="528">FastAPI × N</text>
+    <text class="small" x="1262" y="555">Stateless · shared image volume</text>
   </g>
   <g class="card">
-    <rect x="328" y="739" width="314" height="125" rx="16" fill="#40331e" stroke="#d79b00" stroke-dasharray="5 4"/>
-    <text x="350" y="773" fill="#f7c66b" font-size="11" font-weight="800" letter-spacing="1.5">LIVE STATIC DEMO</text>
-    <text class="card-title" x="350" y="804">Try it without the API</text>
-    <text class="body" x="350" y="833">GitHub Pages · in-browser mock</text>
-    <text class="small" x="350" y="852">Sample data resets on reload</text>
+    <rect x="880" y="665" width="260" height="105" rx="15" fill="#40331e" stroke="#f7c66b"/>
+    <text x="900" y="697" fill="#f7c66b" font-size="11" font-weight="800" letter-spacing="1.2">SHARED DATABASE</text>
+    <text class="card-title" x="900" y="730">PostgreSQL</text>
+    <text class="small" x="900" y="753">Durable store data</text>
+  </g>
+  <g class="card">
+    <rect x="1240" y="665" width="340" height="105" rx="15" fill="#183c45" stroke="#22d3ee"/>
+    <text x="1262" y="697" fill="#67e8f9" font-size="11" font-weight="800" letter-spacing="1.2">SHARED CACHE</text>
+    <text class="card-title" x="1262" y="730">Redis</text>
+    <text class="small" x="1262" y="753">Products · categories · settings</text>
   </g>
 
-  <!-- Edge -->
-  <g class="card">
-    <rect x="714" y="404" width="146" height="164" rx="18" fill="#33244b" stroke="#c084fc"/>
-    <path d="M787 432l20 8v16c0 15-9 25-20 30-11-5-20-15-20-30v-16z" fill="#c084fc" opacity=".18" stroke="#d8b4fe" stroke-width="1.5"/>
-    <path d="M779 456l6 6 11-13" fill="none" stroke="#e9d5ff" stroke-width="2.4"/>
-    <text class="card-title" x="787" y="510" text-anchor="middle">NGINX</text>
-    <text class="body" x="787" y="534" text-anchor="middle">HTTPS / TLS</text>
-    <text class="small" x="787" y="553" text-anchor="middle">Static files + /api proxy</text>
-  </g>
+  <rect x="80" y="800" width="1500" height="42" rx="12" fill="#ffffff" opacity=".055" stroke="#ffffff" stroke-opacity=".15"/>
+  <text x="100" y="826" fill="#d4deef" font-size="12" font-weight="750">Switching modes:</text>
+  <text x="215" y="826" fill="#b8c5e1" font-size="12">migrate SQLite → PostgreSQL to scale up; PostgreSQL → SQLite to return. Stop writes and back up first.</text>
 
-  <!-- Application services -->
-  <g class="card">
-    <rect x="932" y="270" width="285" height="127" rx="16" fill="#1c3151" stroke="#60a5fa"/>
-    <text x="954" y="301" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.4">FASTAPI APPLICATION</text>
-    <text class="card-title" x="954" y="332">Validated API surface</text>
-    <text class="body" x="954" y="359">Public kiosk · authenticated admin</text>
-    <text class="small" x="954" y="382">Routers · schemas · JWT auth</text>
-  </g>
-  <g class="card">
-    <rect x="932" y="418" width="285" height="118" rx="16" fill="#1d3658" stroke="#60a5fa"/>
-    <text x="954" y="449" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.4">PRODUCTS + BARCODE</text>
-    <text class="card-title" x="954" y="480">Exact code lookup</text>
-    <text class="body" x="954" y="507">Active product · unique aliases</text>
-    <text class="small" x="954" y="526">Many codes can point to one product</text>
-  </g>
-  <g class="card">
-    <rect x="932" y="557" width="285" height="118" rx="16" fill="#1d3658" stroke="#60a5fa"/>
-    <text x="954" y="588" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.4">ORDERS + CHECKOUT</text>
-    <text class="card-title" x="954" y="619">A tab, not a card terminal</text>
-    <text class="body" x="954" y="646">Stock deducted · price snapshotted</text>
-    <text class="small" x="954" y="665">Staff settle or cancel orders</text>
-  </g>
-  <g class="card">
-    <rect x="932" y="696" width="285" height="118" rx="16" fill="#1d3658" stroke="#60a5fa"/>
-    <text x="954" y="727" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.4">CUSTOMERS + REPORTS</text>
-    <text class="card-title" x="954" y="758">History into useful insight</text>
-    <text class="body" x="954" y="785">Balances · sales · top products</text>
-    <text class="small" x="954" y="804">Daily · weekly · monthly views</text>
-  </g>
-
-  <!-- Persistent data -->
-  <g class="card">
-    <rect x="1292" y="270" width="320" height="115" rx="16" fill="#40331e" stroke="#f7c66b"/>
-    <ellipse cx="1332" cy="302" rx="20" ry="8" fill="none" stroke="#f7c66b" stroke-width="2"/>
-    <path d="M1312 302v30c0 5 9 9 20 9s20-4 20-9v-30m-40 14c0 5 9 9 20 9s20-4 20-9" fill="none" stroke="#f7c66b" stroke-width="2"/>
-    <text class="card-title" x="1370" y="306">SQLite database</text>
-    <text class="body" x="1370" y="335">Persistent store data</text>
-    <text class="small" x="1370" y="359">Local file · startup migrations</text>
-  </g>
-  <g class="card">
-    <rect x="1292" y="418" width="320" height="118" rx="16" fill="#292e3c" stroke="#8d9ab3"/>
-    <text x="1314" y="449" fill="#c6d1e6" font-size="11" font-weight="800" letter-spacing="1.4">PRODUCTS</text>
-    <text class="card-title" x="1314" y="480">Catalog + stock</text>
-    <text class="body" x="1314" y="507">Price · specials · images · category</text>
-    <text class="small" x="1314" y="526">Active state · inventory count</text>
-  </g>
-  <g class="card">
-    <rect x="1292" y="557" width="320" height="118" rx="16" fill="#40331e" stroke="#f7c66b"/>
-    <text x="1314" y="588" fill="#f7c66b" font-size="11" font-weight="800" letter-spacing="1.4">PRODUCT_BARCODES</text>
-    <text class="card-title" x="1314" y="619">One product · many codes</text>
-    <text class="body" x="1314" y="646">Normalized values · global uniqueness</text>
-    <text class="small" x="1314" y="665">Product relationship stored in SQLite</text>
-  </g>
-  <g class="card">
-    <rect x="1292" y="696" width="320" height="118" rx="16" fill="#292e3c" stroke="#8d9ab3"/>
-    <text x="1314" y="727" fill="#c6d1e6" font-size="11" font-weight="800" letter-spacing="1.4">ORDERS · CUSTOMERS · SETTINGS</text>
-    <text class="card-title" x="1314" y="758">A consistent store record</text>
-    <text class="body" x="1314" y="785">Order lines keep purchase-time prices</text>
-    <text class="small" x="1314" y="804">Balance reflects pending orders</text>
-  </g>
-
-  <rect x="40" y="958" width="1600" height="1" fill="#71809f" opacity=".3"/>
-  <text x="48" y="983" fill="#8e9bb6" font-size="11">BROWSE → IDENTIFY → CHECK OUT → RECONCILE</text>
-  <text x="1632" y="983" fill="#8e9bb6" font-size="11" text-anchor="end">EDITABLE SOURCE: docs/kiosk-architecture.drawio</text>
+  <text x="48" y="918" fill="#8e9bb6" font-size="11">THE SIMPLE SQLITE DEPLOYMENT REMAINS THE DEFAULT · HIGH-TRAFFIC COMPOSE MODE IS OPT-IN</text>
+  <text x="1632" y="918" fill="#8e9bb6" font-size="11" text-anchor="end">EDITABLE SOURCE: docs/kiosk-architecture.drawio</text>
 </svg>

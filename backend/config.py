@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
     database_path: str = os.environ.get("DATABASE_PATH", "data/kiosk.db")
+    database_url: str | None = None
+    redis_url: str | None = None
     secret_key: str = _default_secret_key()
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
