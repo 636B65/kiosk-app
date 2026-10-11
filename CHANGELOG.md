@@ -2,6 +2,21 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.23] - 2026-10-11
+
+### Added
+- **Barcode shopping** — products support multiple unique barcodes. Staff can scan or enter
+  barcode aliases while creating or editing a product, and shoppers can scan a code to add
+  the matching active product to their cart. The API, GitHub Pages demo, and kiosk share
+  the same lookup behavior.
+- Added a detailed draw.io architecture diagram at `docs/kiosk-architecture.drawio`.
+- Added the repository `kiosk-release` skill to guide validation, commits, CI, releases,
+  and container image publishing.
+
+### Tests
+- All backend tests (45), the full e2e suite (28 steps), ruff, mypy, and JavaScript syntax
+  validation pass.
+
 ## [1.0.22] - 2026-10-11
 
 ### Fixed

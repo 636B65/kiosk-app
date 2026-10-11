@@ -149,6 +149,7 @@
             id: p.id, name: p.name, description: p.description, price: p.price,
             special_price: p.special_price, is_weekly_special: p.is_weekly_special,
             stock: p.stock, is_active: p.is_active, category_id: p.category_id,
+            barcodes: p.barcodes || [],
             category: categoryOf(p),
             image_url: p.image_path || null,
         };
@@ -168,6 +169,22 @@
             customer_username: customerById(o.customer_id)?.username || null,
             created_at: o.created_at, completed_at: o.completed_at, due_date: o.due_date,
         };
+    }
+
+    function normalizeBarcodes(values) {
+        return [...new Set((Array.isArray(values) ? values : [])
+            .filter((code) => typeof code === "string")
+            .map((code) => code.trim().toLowerCase())
+            .filter(Boolean))];
+    }
+
+    function assertUniqueBarcodes(barcodes, productId) {
+        for (const code of barcodes) {
+            if (DB.products.some((p) =>
+                p.id !== productId && (p.barcodes || []).includes(code))) {
+                throw new ApiError(HTTP.CONFLICT, "A barcode is already assigned to another product");
+            }
+        }
     }
 
     function statsFor(customerId) {
@@ -423,6 +440,7 @@
         BAD_REQUEST: 400,
         UNAUTHORIZED: 401,
         FORBIDDEN: 403,
+        CONFLICT: 409,
         NOT_FOUND: 404,
     };
 
@@ -515,8 +533,10 @@
                 is_weekly_special: !!body.is_weekly_special,
                 stock: body.stock || 0, is_active: body.is_active !== false,
                 category_id: body.category_id ?? null, image_path: null,
+                barcodes: normalizeBarcodes(body.barcodes),
                 created_at: fmtDT(new Date()),
             };
+            assertUniqueBarcodes(p.barcodes, null);
             DB.products.push(p);
             return response(HTTP.CREATED, productOut(p));
         }
@@ -524,6 +544,11 @@
             requireAdmin(init);
             const p = DB.products.find((x) => x.id === Number(parts[1]));
             if (!p) throw new ApiError(HTTP.NOT_FOUND, "Product not found");
+            if (body.barcodes !== undefined) {
+                const barcodes = normalizeBarcodes(body.barcodes);
+                assertUniqueBarcodes(barcodes, p.id);
+                p.barcodes = barcodes;
+            }
             if (body.name !== undefined) p.name = body.name;
             if (body.description !== undefined) p.description = body.description;
             if (body.price !== undefined) p.price = body.price;
@@ -533,6 +558,13 @@
             if (body.is_active !== undefined) p.is_active = body.is_active;
             if (body.category_id !== undefined) p.category_id = body.category_id;
             return productOut(p);
+        }
+        if (parts.length === 3 && parts[0] === "products" && parts[1] === "barcode" && method === "GET") {
+            const barcode = decodeURIComponent(parts[2]).trim().toLowerCase();
+            const product = DB.products.find((p) =>
+                p.is_active && (p.barcodes || []).includes(barcode));
+            if (!product) throw new ApiError(HTTP.NOT_FOUND, "No active product found for barcode");
+            return productOut(product);
         }
         if (parts.length >= 2 && parts[0] === "products" && method === "DELETE") {
             requireAdmin(init);

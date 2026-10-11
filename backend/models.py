@@ -55,6 +55,16 @@ class Product(Base):
 
     category = relationship("Category", back_populates="products")
     order_items = relationship("OrderItem", back_populates="product")
+    barcode_entries = relationship(
+        "ProductBarcode",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductBarcode.code",
+    )
+
+    @property
+    def barcodes(self):
+        return [entry.code for entry in self.barcode_entries]
 
     @property
     def image_url(self):
@@ -67,6 +77,16 @@ class Product(Base):
         if self.is_weekly_special and self.special_price is not None:
             return self.special_price
         return self.price
+
+
+class ProductBarcode(Base):
+    __tablename__ = "product_barcodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(128), unique=True, index=True, nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+
+    product = relationship("Product", back_populates="barcode_entries")
 
 
 class Customer(Base):

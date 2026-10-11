@@ -22,6 +22,13 @@ const Kiosk = {
             const recalc = e.target.closest(".recalc-cart");
             if (recalc) this.renderCart();
         });
+        document.addEventListener("submit", (e) => {
+            const barcodeForm = e.target.closest("#barcode-scan-form");
+            if (barcodeForm) {
+                e.preventDefault();
+                this.scanBarcode(document.getElementById("barcode-input").value);
+            }
+        });
     },
 
     renderHeader() {
@@ -29,6 +36,11 @@ const Kiosk = {
         return `
             <header class="kiosk-header">
                 <h1>🛍️ ${esc(name)}</h1>
+                <form id="barcode-scan-form" class="barcode-scan-form">
+                    <input id="barcode-input" aria-label="Scan product barcode"
+                           placeholder="Scan barcode…" autocomplete="off" autocapitalize="off">
+                    <button type="submit">Scan</button>
+                </form>
                 <div style="display:flex; gap:0.75rem;">
                     <button class="cart-btn" id="lookup-btn">🔍 User lookup</button>
                     <button class="cart-btn">🛒 Cart <span class="cart-badge" id="cart-count">${Store.cartCount()}</span></button>
@@ -116,6 +128,10 @@ const Kiosk = {
     addToCart(productId) {
         const product = Store.products.find((p) => p.id === productId);
         if (!product) return;
+        if (product.stock <= 0) {
+            Toast.error("This product is out of stock");
+            return;
+        }
         const item = Store.cart.find((i) => i.product_id === productId);
         if (item) {
             if (item.quantity >= product.stock) {
@@ -128,6 +144,29 @@ const Kiosk = {
         }
         Store.saveCart();
         this.refreshUI();
+    },
+
+    async scanBarcode(value) {
+        const input = document.getElementById("barcode-input");
+        const barcode = (value || "").trim();
+        if (!barcode) return;
+        if (input) input.value = "";
+        try {
+            const product = await API.get(`/products/barcode/${encodeURIComponent(barcode)}`);
+            const existing = Store.products.findIndex((item) => item.id === product.id);
+            if (existing === -1) Store.products.push(product);
+            else Store.products[existing] = product;
+            if (product.stock <= 0) {
+                Toast.error(`${product.name} is out of stock`);
+                return;
+            }
+            this.addToCart(product.id);
+            Toast.success(`${product.name} added to cart`);
+        } catch (err) {
+            Toast.error(err.message || "No product found for that barcode");
+        } finally {
+            document.getElementById("barcode-input")?.focus();
+        }
     },
 
     changeQty(productId, delta) {
@@ -453,6 +492,7 @@ const Kiosk = {
             <div id="product-grid-container"></div>
         `;
         this.renderProductGrid();
+        document.getElementById("barcode-input")?.focus();
     },
 
     async render() {

@@ -361,8 +361,40 @@ server.listen(PORT, async () => {
       return "weekly badge shown";
     });
 
+    await step("admin: assign multiple barcodes to a product", async () => {
+      const row = page.locator("tr", { hasText: "USB-C Cable" }).first();
+      await row.locator(".edit-product").click();
+      await page.waitForSelector("#product-form");
+      await page.locator("#p-barcodes").fill("0123456789012\nUSB-C-ALT");
+      await page.locator("#product-form button[type=submit]").click();
+      await page.waitForTimeout(700);
+      if (await page.locator("#modal-overlay").count()) throw new Error("product edit did not save");
+      return "two barcodes saved";
+    });
+
+    await step("customer: scan either barcode to add product to cart", async () => {
+      await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+      await page.waitForSelector("#barcode-input");
+      const input = page.locator("#barcode-input");
+      await input.fill("0123456789012");
+      await input.press("Enter");
+      await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "1");
+      await input.fill("USB-C-ALT");
+      await input.press("Enter");
+      await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "2");
+      await page.locator(".cart-btn", { hasText: "Cart" }).click();
+      await page.waitForSelector("#cart-overlay");
+      const cart = await page.locator("#cart-overlay").textContent();
+      if (!cart.includes("USB-C Cable") || !cart.includes("× 2")) {
+        throw new Error("barcode scans did not add the same item twice: " + cart);
+      }
+      await page.locator("#cart-overlay .cart-close").click();
+      await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
+      return "both codes added USB-C Cable to cart";
+    });
+
     await step("admin: customers page lists balance", async () => {
-      await page.locator('a[data-view="customers"]').click();
+      await page.goto(`http://127.0.0.1:${PORT}/#admin/customers`, { waitUntil: "networkidle" });
       await page.waitForTimeout(600);
       const row = page.locator("tr", { hasText: "alice" });
       const text = await row.textContent();

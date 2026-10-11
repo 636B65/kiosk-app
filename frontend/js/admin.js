@@ -265,6 +265,11 @@ const Admin = {
                     <textarea id="p-desc" rows="2">${esc(product?.description || "")}</textarea>
                 </div>
                 <div class="form-group">
+                    <label for="p-barcodes">Barcodes</label>
+                    <textarea id="p-barcodes" rows="3" placeholder="Scan or enter one barcode per line">${esc((product?.barcodes || []).join("\n"))}</textarea>
+                    <small style="color:var(--muted);">Scan each barcode into this field or type one per line. Multiple barcodes can identify the same product.</small>
+                </div>
+                <div class="form-group">
                     <label>Category</label>
                     <select id="p-category">
                         <option value="">— None —</option>
@@ -328,6 +333,10 @@ const Admin = {
             const payload = {
                 name: document.getElementById("p-name").value.trim(),
                 description: document.getElementById("p-desc").value,
+                barcodes: document.getElementById("p-barcodes").value
+                    .split(/\r?\n/)
+                    .map((barcode) => barcode.trim())
+                    .filter(Boolean),
                 category_id: document.getElementById("p-category").value ? parseInt(document.getElementById("p-category").value) : null,
                 price: parseFloat(document.getElementById("p-price").value) || 0,
                 stock: parseInt(document.getElementById("p-stock").value) || 0,

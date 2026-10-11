@@ -3,11 +3,12 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from config import settings
 from database import get_db
-from models import Product
+from models import Product, ProductBarcode
 from schemas import ProductCreate, ProductOut, ProductUpdate
 from security import get_current_user
 
@@ -80,6 +81,21 @@ def list_products(
     return query.order_by(Product.name).all()
 
 
+@router.get("/barcode/{barcode}", response_model=ProductOut)
+def get_product_by_barcode(barcode: str, db: Session = Depends(get_db)):
+    code = barcode.strip().casefold()
+    product = (
+        db.query(Product)
+        .join(ProductBarcode, ProductBarcode.product_id == Product.id)
+        .options(joinedload(Product.category))
+        .filter(ProductBarcode.code == code, Product.is_active.is_(True))
+        .first()
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="No active product found for barcode")
+    return product
+
+
 @router.get("/{product_id}", response_model=ProductOut)
 def get_product(product_id: int, db: Session = Depends(get_db)):
     product = (
@@ -99,9 +115,22 @@ def create_product(
     db: Session = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
-    product = Product(**data.model_dump())
+    values = data.model_dump()
+    barcodes = values.pop("barcodes")
+    product = Product(**values)
     db.add(product)
-    db.commit()
+    db.flush()
+    product.barcode_entries.extend(
+        ProductBarcode(code=code) for code in barcodes
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A barcode is already assigned to another product",
+        ) from exc
     db.refresh(product)
     return product
 
@@ -116,9 +145,24 @@ def update_product(
     product = db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    values = data.model_dump(exclude_unset=True)
+    barcodes = values.pop("barcodes", None)
+    for field, value in values.items():
         setattr(product, field, value)
-    db.commit()
+    if barcodes is not None:
+        product.barcode_entries.clear()
+        db.flush()
+        product.barcode_entries.extend(
+            ProductBarcode(code=code) for code in barcodes
+        )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A barcode is already assigned to another product",
+        ) from exc
     db.refresh(product)
     return product
 

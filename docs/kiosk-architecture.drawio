@@ -1,0 +1,124 @@
+<mxfile host="app.diagrams.net" modified="2026-10-11T19:45:00.000Z" agent="GitHub Copilot" version="24.7.17" type="device">
+  <diagram id="kiosk-architecture" name="Kiosk System Architecture">
+    <mxGraphModel dx="1700" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1750" pageHeight="920" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="lane-actors" value="PEOPLE &amp; DEVICES" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#f5f5f5;swimlaneFillColor=#ffffff;strokeColor=#a3a3a3;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="40" width="270" height="820" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-frontend" value="WEB EXPERIENCES" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#eaf4e5;swimlaneFillColor=#ffffff;strokeColor=#82b366;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="310" y="40" width="370" height="820" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-edge" value="EDGE / TLS" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#f2eaf7;swimlaneFillColor=#ffffff;strokeColor=#9673a6;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="40" width="230" height="820" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-api" value="APPLICATION SERVICES" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#eaf1fb;swimlaneFillColor=#ffffff;strokeColor=#6c8ebf;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="950" y="40" width="370" height="820" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-data" value="PERSISTENCE" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#f1f1f1;swimlaneFillColor=#ffffff;strokeColor=#666666;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="40" width="380" height="820" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="customer" value="CUSTOMER&#xa;Touchscreen shopper" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="55" y="150" width="200" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="scanner" value="BARCODE SCANNER&#xa;USB / Bluetooth HID&#xa;Sends code + Enter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="55" y="300" width="200" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="staff" value="STORE STAFF&#xa;Admin / cashier" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="55" y="545" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="kiosk-ui" value="KIOSK WEB APP&#xa;Product browsing + categories&#xa;Barcode input resolves a product&#xa;Cart, stock feedback, checkout&#xa;Vanilla JS · local cart storage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="335" y="145" width="320" height="145" as="geometry"/>
+        </mxCell>
+        <mxCell id="admin-ui" value="ADMIN WEB APP&#xa;Product create / edit&#xa;Scan or enter multiple barcodes&#xa;Orders, payments, customers, reports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="335" y="410" width="320" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="demo-mock" value="GITHUB PAGES DEMO&#xa;demo.js fetch mock&#xa;In-memory products + barcode lookup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce5cd;strokeColor=#d79b00;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="335" y="680" width="320" height="95" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="nginx" value="NGINX&#xa;HTTPS / TLS termination&#xa;Serves frontend assets&#xa;Proxies /api requests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="330" width="190" height="125" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="fastapi" value="FASTAPI APP&#xa;Router wiring · validation&#xa;Admin JWT authentication&#xa;Public kiosk catalog / lookup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="975" y="105" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="product-api" value="PRODUCTS API&#xa;Create / update product&#xa;GET /products/barcode/{code}&#xa;Enforce unique barcode assignment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="975" y="265" width="320" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="order-api" value="ORDERS API&#xa;Checkout snapshots product price&#xa;Deducts stock; creates pending tab&#xa;Staff can settle / cancel orders" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="975" y="425" width="320" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="customer-api" value="CUSTOMERS + REPORTS&#xa;Public customer lookup&#xa;Admin customer history / payment stats&#xa;Sales, product and customer insights" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="975" y="590" width="320" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="orm" value="SQLAlchemy models&#xa;Relationships + transactions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="975" y="750" width="320" height="65" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="sqlite" value="SQLITE DATABASE&#xa;Persistent kiosk data" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f5f5f5;strokeColor=#666666;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="105" width="320" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="products-table" value="PRODUCTS&#xa;Name · category · price · stock&#xa;Active state · specials · image" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="260" width="320" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="barcodes-table" value="PRODUCT_BARCODES&#xa;Unique normalized barcode value&#xa;product_id → products.id&#xa;One product can own many codes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="405" width="320" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="business-tables" value="ORDERS + ORDER_ITEMS&#xa;CUSTOMERS · CATEGORIES · SETTINGS&#xa;Order lines preserve purchased price" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="570" width="320" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="barcode-flow" value="BARCODE-TO-CART FLOW&#xa;1. Scanner types code into kiosk field&#xa;2. API finds the active product&#xa;3. Kiosk adds one unit to the cart&#xa;4. Repeated scans increase quantity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="710" width="320" height="115" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="flow-customer" value="browse / buy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#82b366;fontSize=12;" edge="1" parent="1" source="customer" target="kiosk-ui">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-scanner" value="code + Enter" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#d6b656;fontSize=12;" edge="1" parent="1" source="scanner" target="kiosk-ui">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-staff" value="maintain products / settle tabs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;fontSize=12;" edge="1" parent="1" source="staff" target="admin-ui">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-kiosk-proxy" value="catalog, barcode lookup, checkout" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#82b366;fontSize=12;" edge="1" parent="1" source="kiosk-ui" target="nginx">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-admin-proxy" value="authenticated admin API" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;fontSize=12;" edge="1" parent="1" source="admin-ui" target="nginx">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-proxy-api" value="TLS-protected /api" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;fontSize=12;" edge="1" parent="1" source="nginx" target="fastapi">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-app-product" value="route to products" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;fontSize=11;" edge="1" parent="1" source="fastapi" target="product-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-app-orders" value="route to checkout" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;fontSize=11;" edge="1" parent="1" source="fastapi" target="order-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-app-customer" value="routes to history / reports" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;endArrow=block;endFill=1;html=1;strokeColor=#6c8ebf;fontSize=11;" edge="1" parent="1" source="fastapi" target="customer-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-products-data" value="ORM read / write" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=11;" edge="1" parent="1" source="product-api" target="products-table">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-barcode-data" value="exact barcode match" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#d6b656;fontSize=11;" edge="1" parent="1" source="product-api" target="barcodes-table">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-order-data" value="order and customer records" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=11;" edge="1" parent="1" source="order-api" target="business-tables">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-customer-data" value="history / stats queries" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=11;" edge="1" parent="1" source="customer-api" target="business-tables">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="flow-demo" value="demo mode bypasses live API" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#d79b00;fontSize=11;" edge="1" parent="1" source="kiosk-ui" target="demo-mock">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

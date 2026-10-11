@@ -69,6 +69,64 @@ def test_products_are_sek_priced(products):
         assert p["price"] >= 0
 
 
+def test_product_barcodes_support_multiple_scans_and_unique_lookup(
+    client, admin_headers
+):
+    created = client.post(
+        "/api/products",
+        headers=admin_headers,
+        json={
+            "name": "Barcode Test Drink",
+            "price": 2.5,
+            "stock": 5,
+            "barcodes": [" 00012345 ", "DRINK-A", "drink-a", ""],
+        },
+    )
+    assert created.status_code == 201, created.text
+    product = created.json()
+    assert product["barcodes"] == ["00012345", "drink-a"]
+
+    for barcode in ("00012345", "DRINK-A"):
+        found = client.get(f"/api/products/barcode/{barcode}")
+        assert found.status_code == 200
+        assert found.json()["id"] == product["id"]
+
+    duplicate = client.post(
+        "/api/products",
+        headers=admin_headers,
+        json={
+            "name": "Duplicate Barcode Test",
+            "price": 1,
+            "stock": 1,
+            "barcodes": ["drink-a"],
+        },
+    )
+    assert duplicate.status_code == 409
+
+    updated = client.put(
+        f"/api/products/{product['id']}",
+        headers=admin_headers,
+        json={"barcodes": ["NEW-CODE", "new-code"]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["barcodes"] == ["new-code"]
+    assert client.get("/api/products/barcode/00012345").status_code == 404
+    assert client.get("/api/products/barcode/NEW-CODE").json()["id"] == product["id"]
+
+    inactive = client.put(
+        f"/api/products/{product['id']}",
+        headers=admin_headers,
+        json={"is_active": False},
+    )
+    assert inactive.status_code == 200
+    assert client.get("/api/products/barcode/new-code").status_code == 404
+    assert client.get("/api/products/barcode/not-found").status_code == 404
+    assert client.post(
+        "/api/products",
+        json={"name": "Unauthorized", "price": 1, "stock": 1},
+    ).status_code == 401
+
+
 # --------------------------------------------------------------------------- #
 # Customer checkout / tab model
 # --------------------------------------------------------------------------- #

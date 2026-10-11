@@ -1,12 +1,33 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MIN_PASSWORD_LENGTH = 8
 MAX_ORDER_QUANTITY = 1000
 MAX_ORDER_ITEMS = 50
 MAX_NOTES_LENGTH = 500
+
+
+def normalize_barcodes(values) -> Optional[List[str]]:
+    if values is None:
+        return None
+    if not isinstance(values, list):
+        raise ValueError("barcodes must be a list of strings")
+    if len(values) > 50:
+        raise ValueError("a product may have at most 50 barcodes")
+    normalized = []
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError("barcodes must be strings")
+        code = value.strip().casefold()
+        if not code:
+            continue
+        if len(code) > 128:
+            raise ValueError("barcodes must not exceed 128 characters")
+        if code not in normalized:
+            normalized.append(code)
+    return normalized
 
 
 class CategoryBase(BaseModel):
@@ -40,6 +61,12 @@ class ProductBase(BaseModel):
     stock: int = 0
     is_active: bool = True
     category_id: Optional[int] = None
+    barcodes: List[str] = Field(default_factory=list)
+
+    @field_validator("barcodes", mode="before")
+    @classmethod
+    def _normalize_barcodes(cls, values):
+        return normalize_barcodes(values) or []
 
 
 class ProductCreate(ProductBase):
@@ -55,6 +82,12 @@ class ProductUpdate(BaseModel):
     stock: Optional[int] = None
     is_active: Optional[bool] = None
     category_id: Optional[int] = None
+    barcodes: Optional[List[str]] = None
+
+    @field_validator("barcodes", mode="before")
+    @classmethod
+    def _normalize_barcodes(cls, values):
+        return normalize_barcodes(values)
 
 
 class ProductOut(ProductBase):

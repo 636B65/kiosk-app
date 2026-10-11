@@ -81,6 +81,27 @@ def migrate(engine: Engine) -> None:
                     text("ALTER TABLE products ADD COLUMN special_price FLOAT")
                 )
 
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS product_barcodes ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "code VARCHAR(128) NOT NULL UNIQUE, "
+                "product_id INTEGER NOT NULL REFERENCES products(id))"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_product_barcodes_code "
+                "ON product_barcodes (code)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_product_barcodes_product_id "
+                "ON product_barcodes (product_id)"
+            )
+        )
+
         if "orders" in tables:
             columns = [row[1] for row in conn.execute(text("PRAGMA table_info(orders)"))]
 
