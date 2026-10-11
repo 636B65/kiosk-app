@@ -38,10 +38,23 @@ sample data. Everything lives in your browser and **resets on reload**.
 - Dashboard: outstanding balance, today/week/month/all-time sales, low stock
 - Products/Categories management, including product image upload and weekly
   specials (special price, listed at the top of the shop)
+- Barcode-assisted product setup and kiosk checkout (a product can have multiple
+  barcode aliases)
 - Orders with paid/cancelled statuses and per-order item detail
 - Customers: balances, per-customer stats, monthly history, reset payment
-- Reports with outstanding balance and sales breakdown
+- Reports with outstanding balance, sales breakdown, customer/product leaderboards,
+  and recent payment insights
 - User management (admin accounts)
+
+## Architecture
+
+The diagram shows how shoppers, staff, barcode scanners, the web apps, API, and
+local data store work together.
+
+![Kiosk App system architecture](docs/kiosk-architecture.svg)
+
+For a guided product overview, open the [sales presentation](docs/kiosk-sales-presentation.html).
+The editable source diagram is [available in draw.io format](docs/kiosk-architecture.drawio).
 
 ## Tech stack
 

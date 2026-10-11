@@ -2,6 +2,21 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.24] - 2026-10-11
+
+### Changed
+- Expanded the README with the architecture visual and direct links to the editable
+  diagram and product presentation.
+
+### Added
+- Added a standalone eight-slide sales presentation in `docs/kiosk-sales-presentation.html`,
+  with keyboard navigation and print-to-PDF styling.
+- Added a polished SVG architecture visual alongside the editable draw.io source.
+
+### Tests
+- Presentation HTML structure and assets, embedded JavaScript syntax, and SVG XML
+  validated; the slide deck rendered successfully in headless Chromium.
+
 ## [1.0.23] - 2026-10-11
 
 ### Added

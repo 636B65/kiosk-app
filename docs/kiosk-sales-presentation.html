@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <meta name="description" content="A sales presentation for Kiosk App: a practical self-service shop with barcode checkout, staff controls, and useful sales insights.">
+  <title>Kiosk App — Small shop. Big flow.</title>
+  <style>
+    :root{color-scheme:dark;--ink:#f8fafc;--muted:#b3bfd3;--bg:#0c1222;--panel:#151e32;--line:#33415c;--mint:#61e6b8;--cyan:#54d5ed;--violet:#a78bfa;--gold:#f8c76b}
+    *{box-sizing:border-box}
+    html{background:var(--bg);scroll-behavior:smooth}
+    body{margin:0;background:radial-gradient(ellipse at 80% 12%,#27214e 0,transparent 40%),radial-gradient(ellipse at 8% 90%,#103443 0,transparent 33%),var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+    a{color:inherit}
+    .topbar{position:fixed;z-index:5;inset:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:17px 4vw;background:#0c1222d9;border-bottom:1px solid #ffffff12;backdrop-filter:blur(12px)}
+    .brand{display:flex;align-items:center;gap:11px;font-size:13px;font-weight:850;letter-spacing:.13em;text-transform:uppercase}
+    .brand-mark{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--mint),var(--cyan));color:#09202a;font-size:17px}
+    .top-actions{display:flex;gap:10px;align-items:center}
+    .top-actions a,.top-actions button,.nav button{border:1px solid #ffffff27;background:#ffffff08;color:var(--ink);border-radius:999px;padding:9px 15px;text-decoration:none;font:inherit;font-size:12px;font-weight:750;cursor:pointer}
+    .top-actions a:hover,.top-actions button:hover,.nav button:hover{background:#ffffff18}
+    .deck{height:100svh;min-height:600px;overflow-y:auto;scroll-snap-type:y mandatory;scrollbar-width:thin;scrollbar-color:#465572 transparent}
+    .slide{position:relative;min-height:100svh;padding:105px 8vw 100px;display:flex;align-items:center;scroll-snap-align:start;overflow:hidden}
+    .slide-inner{position:relative;z-index:1;width:min(1180px,100%);margin:auto}
+    .eyebrow{display:flex;align-items:center;gap:10px;color:var(--mint);font-size:12px;font-weight:850;letter-spacing:.18em;text-transform:uppercase}
+    .eyebrow:before{content:"";width:25px;height:2px;background:currentColor}
+    h1,h2,h3,p{margin-top:0}
+    h1{max-width:950px;margin:25px 0;font-size:clamp(3.5rem,8.8vw,8rem);line-height:.94;letter-spacing:-.075em}
+    h2{max-width:900px;margin:20px 0;font-size:clamp(2.4rem,5.5vw,5.2rem);line-height:.98;letter-spacing:-.06em}
+    h3{font-size:20px;letter-spacing:-.025em}
+    .lead{max-width:720px;color:#d2dcec;font-size:clamp(18px,2vw,24px);line-height:1.55}
+    .muted{color:var(--muted)}
+    .gradient-text{background:linear-gradient(100deg,var(--mint),var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .hero{min-height:100svh}
+    .hero:after{content:"";position:absolute;right:-9vw;top:14vh;width:min(53vw,750px);aspect-ratio:1;border:1px solid #61e6b833;border-radius:50%;box-shadow:0 0 0 46px #61e6b80a,0 0 0 100px #54d5ed08}
+    .hero-orbit{position:absolute;z-index:1;right:10vw;top:30vh;width:150px;height:150px;border-radius:38px;transform:rotate(14deg);display:grid;place-items:center;background:linear-gradient(140deg,#61e6b8,#54d5ed);box-shadow:0 30px 100px #54d5ed40}
+    .hero-orbit svg{width:88px;height:88px}
+    .hero-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:34px}
+    .pill{border:1px solid #ffffff23;background:#ffffff08;color:#e0e8f5;padding:10px 14px;border-radius:999px;font-size:13px}
+    .hero-note{margin-top:52px;color:#91a0bb;font-size:12px;letter-spacing:.12em;text-transform:uppercase}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:38px}
+    .grid.two{grid-template-columns:repeat(2,1fr)}
+    .card{min-height:190px;padding:24px;border:1px solid #ffffff1c;border-radius:22px;background:linear-gradient(145deg,#ffffff0c,#ffffff04);box-shadow:0 20px 60px #00000013}
+    .card p{margin-bottom:0;color:var(--muted);line-height:1.6}
+    .icon{display:grid;place-items:center;width:43px;height:43px;margin-bottom:24px;border-radius:14px;background:#61e6b81b;color:var(--mint);font-size:21px}
+    .card:nth-child(2) .icon{background:#54d5ed1b;color:var(--cyan)}
+    .card:nth-child(3) .icon{background:#a78bfa1b;color:var(--violet)}
+    .card:nth-child(4) .icon{background:#f8c76b1b;color:var(--gold)}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:55px;align-items:center}
+    .steps{display:grid;gap:13px;margin-top:28px}
+    .step{display:grid;grid-template-columns:42px 1fr;gap:14px;align-items:start;padding:16px;border:1px solid #ffffff18;border-radius:17px;background:#ffffff08}
+    .step b{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:#61e6b81a;color:var(--mint)}
+    .step strong{display:block;margin:1px 0 5px}
+    .step span{color:var(--muted);font-size:14px;line-height:1.5}
+    .mockup{position:relative;padding:13px;border:1px solid #ffffff2a;border-radius:25px;background:#0a0f1b;box-shadow:0 30px 100px #0008;transform:rotate(1.2deg)}
+    .mock-top{display:flex;align-items:center;gap:6px;padding:10px 12px;border-bottom:1px solid #ffffff12;color:#8e9cb5;font-size:11px}
+    .dot{width:7px;height:7px;border-radius:50%;background:#fb7185}.dot:nth-child(2){background:#fbbf24}.dot:nth-child(3){background:#4ade80}
+    .mock-content{padding:22px}
+    .mock-title{font-size:21px;font-weight:850}
+    .mock-sub{margin:4px 0 16px;color:#99a7bf;font-size:12px}
+    .mock-items{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .mock-item{padding:14px;border-radius:14px;background:#ffffff0c}
+    .mock-item .emoji{font-size:25px}
+    .mock-item b{display:block;margin-top:8px;font-size:12px}
+    .mock-item small{color:#9eacc8}
+    .scan-line{display:flex;align-items:center;gap:10px;margin-top:13px;padding:12px 14px;border:1px solid #61e6b866;border-radius:12px;color:var(--mint);font-size:12px}
+    .basket{display:flex;justify-content:space-between;margin-top:13px;padding:14px;border-radius:12px;background:#54d5ed12;font-size:13px}
+    .metric-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:38px}
+    .metric{padding:20px 17px;border-top:2px solid var(--mint);background:#ffffff08}
+    .metric:nth-child(2){border-color:var(--cyan)}.metric:nth-child(3){border-color:var(--violet)}.metric:nth-child(4){border-color:var(--gold)}
+    .metric strong{display:block;font-size:17px}
+    .metric span{display:block;margin-top:8px;color:var(--muted);font-size:13px;line-height:1.45}
+    .quote{max-width:940px;margin:25px 0;font-size:clamp(2rem,4.5vw,4.1rem);font-weight:780;line-height:1.1;letter-spacing:-.05em}
+    .quote em{color:var(--mint);font-style:normal}
+    .architecture{width:100%;border:1px solid #ffffff20;border-radius:18px;box-shadow:0 25px 80px #0005}
+    .closing{padding:35px;border:1px solid #61e6b84d;border-radius:27px;background:linear-gradient(120deg,#61e6b814,#54d5ed10,#a78bfa12)}
+    .closing-links{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+    .cta{display:inline-block;padding:13px 19px;border-radius:999px;background:linear-gradient(110deg,var(--mint),var(--cyan));color:#06202a;font-weight:850;text-decoration:none}
+    .cta.alt{border:1px solid #ffffff35;background:#ffffff0a;color:var(--ink)}
+    .footnote{margin-top:25px;color:#8391aa;font-size:12px;line-height:1.5}
+    .nav{position:fixed;z-index:6;right:4vw;bottom:23px;display:flex;align-items:center;gap:9px}
+    .nav button{width:42px;height:42px;padding:0;font-size:18px}
+    .counter{min-width:60px;text-align:center;color:#b3bfd3;font-size:12px;font-variant-numeric:tabular-nums}
+    .progress{position:fixed;z-index:7;inset:auto 0 0;height:3px;background:#ffffff13}
+    .progress span{display:block;width:12.5%;height:100%;background:linear-gradient(90deg,var(--mint),var(--cyan),var(--violet));transition:width .25s ease}
+    @media(max-width:800px){.slide{padding:100px 7vw 90px}.grid{grid-template-columns:1fr 1fr}.grid.two{gap:14px}.split{grid-template-columns:1fr;gap:32px}.hero-orbit{right:8vw;top:auto;bottom:17vh;width:92px;height:92px;border-radius:27px}.hero-orbit svg{width:55px}.hero:after{top:auto;bottom:5vh;width:65vw}.metric-row{grid-template-columns:1fr 1fr}.top-actions a:first-child{display:none}}
+    @media(max-width:520px){.grid,.grid.two{grid-template-columns:1fr}.card{min-height:auto}.hero-meta{max-width:300px}.mockup{transform:none}.metric-row{grid-template-columns:1fr 1fr}.slide{min-height:100svh}.topbar{padding-inline:5vw}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+    @media print{
+      @page{size:landscape;margin:0}
+      html,body{background:#0c1222!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .topbar,.nav,.progress{display:none!important}
+      .deck{height:auto;overflow:visible}
+      .slide{height:100vh;min-height:0;break-after:page;page-break-after:always;padding:55px 7vw}
+      .slide:last-child{break-after:auto;page-break-after:auto}
+      .hero-orbit{display:none}
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">K</span> Kiosk App <span style="color:#8090aa">/</span> Product story</div>
+    <div class="top-actions">
+      <a href="../README.md">Project README</a>
+      <button id="print" type="button" title="Print or save as PDF">Print / PDF</button>
+    </div>
+  </header>
+
+  <main class="deck" id="deck" aria-label="Kiosk App sales presentation">
+    <section class="slide hero" aria-label="Title">
+      <div class="hero-orbit" aria-hidden="true">
+        <svg viewBox="0 0 100 100" fill="none"><path d="M23 22h10l8 39h36l9-27H37" stroke="#08252b" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="75" r="5" fill="#08252b"/><circle cx="73" cy="75" r="5" fill="#08252b"/><path d="M48 42h24M60 30v24" stroke="#08252b" stroke-width="4" stroke-linecap="round"/></svg>
+      </div>
+      <div class="slide-inner">
+        <div class="eyebrow">A smarter way to run a small shop</div>
+        <h1>Small shop.<br><span class="gradient-text">Big flow.</span></h1>
+        <p class="lead">Self-service shopping that keeps the customer moving and gives the team a clear view of products, orders, balances and sales.</p>
+        <div class="hero-meta"><span class="pill">Scan-to-cart</span><span class="pill">Staff-controlled tabs</span><span class="pill">Useful store insights</span><span class="pill">Self-hosted</span></div>
+        <p class="hero-note">Kiosk App · Retail, made refreshingly practical</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="eyebrow">The everyday shop challenge</div>
+        <h2>Less friction at the shelf.<br><span class="gradient-text">More clarity behind the counter.</span></h2>
+        <p class="lead">A small store still needs a smooth way to browse, buy, keep stock straight and follow up on what is owed.</p>
+        <div class="grid">
+          <article class="card"><div class="icon">↗</div><h3>Make self-service simple</h3><p>Let customers browse categories, search, build a cart and check out on a shared kiosk.</p></article>
+          <article class="card"><div class="icon">▦</div><h3>Turn scans into items</h3><p>Use common keyboard-style barcode scanners to find products and add them directly to the cart.</p></article>
+          <article class="card"><div class="icon">◎</div><h3>Keep tabs visible</h3><p>See pending balances, order history and payment status in the staff-facing admin panel.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner split">
+        <div>
+          <div class="eyebrow">The shopping flow</div>
+          <h2>From <span class="gradient-text">beep</span> to basket.</h2>
+          <p class="lead">A scanner behaves like a keyboard: scan the code, the kiosk looks up the active product, and the shopper keeps moving.</p>
+          <div class="steps">
+            <div class="step"><b>01</b><div><strong>Staff set it up once</strong><span>Attach one or more unique barcode aliases to a product in the admin panel.</span></div></div>
+            <div class="step"><b>02</b><div><strong>Shopper scans</strong><span>Scan a barcode into the kiosk field using a USB or Bluetooth HID scanner.</span></div></div>
+            <div class="step"><b>03</b><div><strong>Item lands in the cart</strong><span>The matched active product is added; scanning again increases its quantity.</span></div></div>
+            <div class="step"><b>04</b><div><strong>Checkout stays connected</strong><span>Stock is checked and the purchase is recorded on the customer's tab.</span></div></div>
+          </div>
+        </div>
+        <div class="mockup" aria-label="Illustration of the kiosk product grid and barcode scanning">
+          <div class="mock-top"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span style="margin-left:8px">YOUR STORE · KIOSK</span></div>
+          <div class="mock-content"><div class="mock-title">Good afternoon 👋</div><div class="mock-sub">Find a favorite or scan an item to get started.</div>
+            <div class="mock-items"><div class="mock-item"><span class="emoji">🥤</span><b>Cold drink</b><small>€ 2.50</small></div><div class="mock-item"><span class="emoji">🍪</span><b>Snack pack</b><small>€ 1.80</small></div></div>
+            <div class="scan-line"><span>▥</span> Scan barcode <span style="margin-left:auto">Ready</span></div>
+            <div class="basket"><span>🛒 &nbsp; Basket · 2 items</span><strong>€ 4.30</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="eyebrow">A better store toolkit</div>
+        <h2>Everything essential.<br><span class="gradient-text">Nothing needlessly complicated.</span></h2>
+        <div class="grid">
+          <article class="card"><div class="icon">⌕</div><h3>Customer-first kiosk</h3><p>Product categories, search, photos, weekly specials, cart totals and customer lookup in one touchscreen-friendly flow.</p></article>
+          <article class="card"><div class="icon">▦</div><h3>Flexible barcode setup</h3><p>Support several barcode aliases for a product; keep lookup exact and shared across product setup and shopping.</p></article>
+          <article class="card"><div class="icon">◷</div><h3>Staff stays in charge</h3><p>Review orders, mark payments, manage stock and control products from the admin panel.</p></article>
+          <article class="card"><div class="icon">↗</div><h3>See what is happening</h3><p>Review customer and product rankings, outstanding balances and sales across day, week and month views.</p></article>
+          <article class="card"><div class="icon">▤</div><h3>Keep purchase details straight</h3><p>Order lines preserve product names and prices from checkout, even after the catalog changes.</p></article>
+          <article class="card"><div class="icon">✦</div><h3>Try before you deploy</h3><p>Explore the interactive GitHub Pages demo with sample data before setting up a store instance.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="eyebrow">Know the shop, not just the checkout</div>
+        <h2>Turn daily activity into<br><span class="gradient-text">useful answers.</span></h2>
+        <p class="lead">The admin experience brings operational detail into view—without turning the shop into a spreadsheet project.</p>
+        <div class="metric-row">
+          <div class="metric"><strong>Top customers</strong><span>Ranked by paid spend across day, week and month.</span></div>
+          <div class="metric"><strong>Popular products</strong><span>Most-purchased items and units sold over time.</span></div>
+          <div class="metric"><strong>Payment visibility</strong><span>Pending balances and recent payment activity at a glance.</span></div>
+          <div class="metric"><strong>Customer context</strong><span>Order history and useful per-customer statistics.</span></div>
+        </div>
+        <p class="footnote">Insights are based on the data recorded by the store; the app does not claim to forecast demand.</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner split">
+        <div>
+          <div class="eyebrow">A practical operating model</div>
+          <h2>Checkout for a <span class="gradient-text">tab-based shop.</span></h2>
+          <p class="lead">Kiosk App records orders for staff to reconcile later. It is not a payment processor or a card terminal.</p>
+          <div class="steps">
+            <div class="step"><b>✓</b><div><strong>Order recorded</strong><span>Stock is checked and purchase-time item details are saved.</span></div></div>
+            <div class="step"><b>✓</b><div><strong>Balance stays visible</strong><span>Pending orders contribute to the customer's balance and admin views.</span></div></div>
+            <div class="step"><b>✓</b><div><strong>Staff closes the loop</strong><span>Mark orders paid, cancel pending orders or reset payment for a customer.</span></div></div>
+          </div>
+        </div>
+        <div class="closing">
+          <div class="eyebrow">Built for your own environment</div>
+          <h3 style="font-size:30px;margin:20px 0 13px">Your shop. Your data. Your deployment.</h3>
+          <p class="muted" style="line-height:1.65">Run the app with Docker Compose and keep store data in a local SQLite file. The documented runtime does not make outbound network calls; online access is needed to build or obtain container images.</p>
+          <div class="pill" style="display:inline-block;margin-top:8px">Self-hosted · Docker Compose · SQLite</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="eyebrow">Simple on the surface. Thoughtful underneath.</div>
+        <h2>Made to be run,<br><span class="gradient-text">not just demoed.</span></h2>
+        <p class="lead">A lightweight web stack, persistent store data, HTTPS at the frontend, automatic database migrations and an offline deployment path.</p>
+        <img class="architecture" src="kiosk-architecture.svg" alt="Architecture diagram showing customer and staff flows through kiosk and admin web apps, NGINX TLS, FastAPI, and SQLite">
+        <p class="footnote">The GitHub Pages demo uses an in-browser mock with sample data. A production deployment uses the backend API and its persistent database.</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <div class="closing">
+          <div class="eyebrow">Your next shop shift can feel simpler</div>
+          <p class="quote">A friendly kiosk for customers.<br><em>A clearer picture for staff.</em></p>
+          <p class="lead">See the interactive demo, explore the code, or bring up your own instance with Docker Compose.</p>
+          <div class="closing-links">
+            <a class="cta" href="https://636b65.github.io/kiosk-app/">Try the live demo ↗</a>
+            <a class="cta alt" href="https://github.com/636B65/kiosk-app">Explore the project ↗</a>
+            <a class="cta alt" href="../README.md">Deployment guide ↗</a>
+          </div>
+        </div>
+        <p class="footnote">Kiosk App is a self-hosted store-kiosk project. Features described here are based on the current repository implementation; actual operation depends on local setup and store processes.</p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="Presentation navigation">
+    <button id="prev" type="button" aria-label="Previous slide">←</button>
+    <span class="counter" id="counter" aria-live="polite">01 / 08</span>
+    <button id="next" type="button" aria-label="Next slide">→</button>
+  </nav>
+  <div class="progress" aria-hidden="true"><span id="progress"></span></div>
+  <script>
+    (() => {
+      const deck = document.getElementById("deck");
+      const slides = [...deck.querySelectorAll(".slide")];
+      const counter = document.getElementById("counter");
+      const progress = document.getElementById("progress");
+      let current = 0;
+      const show = (index) => {
+        current = Math.max(0, Math.min(slides.length - 1, index));
+        slides[current].scrollIntoView({ behavior: "smooth", block: "start" });
+        counter.textContent = `${String(current + 1).padStart(2, "0")} / ${String(slides.length).padStart(2, "0")}`;
+        progress.style.width = `${((current + 1) / slides.length) * 100}%`;
+      };
+      document.getElementById("prev").addEventListener("click", () => show(current - 1));
+      document.getElementById("next").addEventListener("click", () => show(current + 1));
+      document.getElementById("print").addEventListener("click", () => window.print());
+      document.addEventListener("keydown", (event) => {
+        if (["ArrowRight", "PageDown", " "].includes(event.key)) {
+          event.preventDefault();
+          show(current + 1);
+        } else if (["ArrowLeft", "PageUp"].includes(event.key)) {
+          event.preventDefault();
+          show(current - 1);
+        } else if (event.key === "Home") {
+          show(0);
+        } else if (event.key === "End") {
+          show(slides.length - 1);
+        }
+      });
+      const observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            current = slides.indexOf(entry.target);
+            counter.textContent = `${String(current + 1).padStart(2, "0")} / ${String(slides.length).padStart(2, "0")}`;
+            progress.style.width = `${((current + 1) / slides.length) * 100}%`;
+          }
+        }
+      }, { root: deck, threshold: 0.6 });
+      slides.forEach((slide) => observer.observe(slide));
+      document.getElementById("counter").textContent = `01 / ${String(slides.length).padStart(2, "0")}`;
+      progress.style.width = `${100 / slides.length}%`;
+    })();
+  </script>
+</body>
+</html>
