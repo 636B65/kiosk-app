@@ -2,6 +2,19 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.25] - 2026-10-11
+
+### Changed
+- The README now links to the sales presentation as a PDF, while retaining a separate link
+  to the interactive HTML version.
+
+### Added
+- Added an eight-page PDF export of the sales presentation to `docs/`.
+
+### Tests
+- PDF metadata, eight-page count, and extracted slide text verified; backend tests (45),
+  Ruff, mypy, JavaScript syntax, and E2E (28 steps) pass.
+
 ## [1.0.24] - 2026-10-11
 
 ### Changed

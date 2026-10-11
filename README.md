@@ -53,7 +53,8 @@ local data store work together.
 
 ![Kiosk App system architecture](docs/kiosk-architecture.svg)
 
-For a guided product overview, open the [sales presentation](docs/kiosk-sales-presentation.html).
+For a guided product overview, view the [sales presentation (PDF)](docs/kiosk-sales-presentation.pdf)
+or open the [interactive HTML version](docs/kiosk-sales-presentation.html).
 The editable source diagram is [available in draw.io format](docs/kiosk-architecture.drawio).
 
 ## Tech stack
