@@ -54,6 +54,7 @@ def stats_for(db: Session, customer_id: int) -> CustomerStats:
     paid = sum(o.total for o in orders if o.status == "paid")
     pending = sum(o.total for o in orders if o.status == "pending")
     total = sum(o.total for o in orders)
+    paid_orders = [o for o in orders if o.status == "paid"]
     count = len(orders)
 
     items_qty = (
@@ -90,6 +91,9 @@ def stats_for(db: Session, customer_id: int) -> CustomerStats:
 
     return CustomerStats(
         orders=count,
+        paid_orders=len(paid_orders),
+        pending_orders=sum(o.status == "pending" for o in orders),
+        cancelled_orders=sum(o.status == "cancelled" for o in orders),
         total_spent=round(total, 2),
         total_paid=round(paid, 2),
         balance=round(pending, 2),
@@ -97,6 +101,17 @@ def stats_for(db: Session, customer_id: int) -> CustomerStats:
         items_bought=int(items_qty or 0),
         first_order_at=orders[0].created_at if orders else None,
         last_order_at=orders[-1].created_at if orders else None,
+        last_paid_at=(
+            max(
+                (o.completed_at or o.created_at for o in paid_orders),
+                default=None,
+            )
+        ),
+        last_paid_amount=(
+            max(paid_orders, key=lambda o: (o.completed_at or o.created_at, o.id)).total
+            if paid_orders
+            else 0.0
+        ),
         top_item=top[0] if top else None,
         top_item_qty=int(top[1]) if top else 0,
         avg_orders_per_month=round(count / month_count, 2),

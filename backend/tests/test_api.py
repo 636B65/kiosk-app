@@ -404,6 +404,54 @@ def test_reports_outstanding_before_payment(client, admin_headers):
     assert summ["today"]["revenue"] == 0  # nothing paid yet
 
 
+def test_customer_insights_rank_paid_customers_and_show_latest_payment(
+    client, products, admin_headers
+):
+    product = max(products, key=lambda item: item["stock"])
+    created_orders = []
+    for username, quantity in (("insight_runner_up", 4), ("insight_leader", 8)):
+        response = client.post(
+            "/api/orders",
+            json={
+                "customer_username": username,
+                "items": [{"product_id": product["id"], "quantity": quantity}],
+            },
+        )
+        assert response.status_code == 201
+        order_id = response.json()["id"]
+        paid = client.patch(
+            f"/api/orders/{order_id}/status?new_status=paid",
+            headers=admin_headers,
+        )
+        assert paid.status_code == 200
+        created_orders.append(paid.json())
+
+    insights = client.get(
+        "/api/reports/customer-insights", headers=admin_headers
+    ).json()
+    for period in ("today", "week", "month"):
+        ranked = insights[period]
+        assert ranked[0]["username"] == "insight_leader"
+        assert ranked[0]["orders"] == 1
+        assert ranked[0]["spent"] > next(
+            row["spent"] for row in ranked if row["username"] == "insight_runner_up"
+        )
+    for period in ("products_today", "products_week", "products_month"):
+        assert insights[period][0]["product"] == product["name"]
+        assert insights[period][0]["quantity"] >= 12
+
+    assert insights["last_paid"]["username"] == "insight_leader"
+    assert insights["last_paid"]["order_id"] == created_orders[-1]["id"]
+    assert insights["last_paid"]["amount"] == pytest.approx(
+        created_orders[-1]["total"]
+    )
+    stats = client.get("/api/customers/insight_leader").json()["stats"]
+    assert stats["paid_orders"] == 1
+    assert stats["pending_orders"] == 0
+    assert stats["cancelled_orders"] == 0
+    assert stats["last_paid_amount"] == pytest.approx(created_orders[-1]["total"])
+
+
 def test_reset_payment_clears_balance(client, admin_headers):
     r = client.post("/api/customers/alice/reset-payment", headers=admin_headers)
     assert r.status_code == 200

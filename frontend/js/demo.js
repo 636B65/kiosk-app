@@ -226,6 +226,9 @@
 
         return {
             orders: count,
+            paid_orders: orders.filter((o) => o.status === "paid").length,
+            pending_orders: orders.filter((o) => o.status === "pending").length,
+            cancelled_orders: orders.filter((o) => o.status === "cancelled").length,
             total_spent: Math.round(total * 100) / 100,
             total_paid: Math.round(paid * 100) / 100,
             balance: Math.round(pending * 100) / 100,
@@ -233,6 +236,14 @@
             items_bought: itemsBought,
             first_order_at: orders[0] ? orders[0].created_at : null,
             last_order_at: orders.length ? orders[orders.length - 1].created_at : null,
+            last_paid_at: orders.filter((o) => o.status === "paid")
+                .map((o) => o.completed_at || o.created_at).sort().slice(-1)[0] || null,
+            last_paid_amount: (() => {
+                const lastPaid = orders.filter((o) => o.status === "paid")
+                    .sort((a, b) => (a.completed_at || a.created_at).localeCompare(b.completed_at || b.created_at))
+                    .slice(-1)[0];
+                return lastPaid ? lastPaid.total : 0;
+            })(),
             top_item: topItem,
             top_item_qty: topQty,
             avg_orders_per_month: Math.round((count / monthCount) * 100) / 100,
@@ -338,6 +349,64 @@
         return Object.keys(byDay).sort().map((day) => ({
             day, orders: byDay[day].orders, revenue: Math.round(byDay[day].revenue * 100) / 100,
         }));
+    }
+
+    function customerInsights(limit) {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const week = new Date(today);
+        week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
+        const month = new Date(now.getFullYear(), now.getMonth(), 1);
+        const leaderRows = (start) => {
+            const byCustomer = {};
+            for (const o of DB.orders) {
+                if (o.status !== "paid" || new Date(o.created_at) < start) continue;
+                const customer = customerById(o.customer_id);
+                if (!customer) continue;
+                const row = byCustomer[customer.username] || { username: customer.username, orders: 0, spent: 0 };
+                row.orders += 1;
+                row.spent += o.total;
+                byCustomer[customer.username] = row;
+            }
+            return Object.values(byCustomer)
+                .sort((a, b) => b.spent - a.spent || b.orders - a.orders || a.username.localeCompare(b.username))
+                .slice(0, limit)
+                .map((row) => ({ ...row, spent: Math.round(row.spent * 100) / 100 }));
+        };
+        const paidOrders = DB.orders.filter((o) => o.status === "paid").sort((a, b) =>
+            (a.completed_at || a.created_at).localeCompare(b.completed_at || b.created_at) || a.id - b.id);
+        const latest = paidOrders[paidOrders.length - 1];
+        return {
+            today: leaderRows(today),
+            week: leaderRows(week),
+            month: leaderRows(month),
+            products_today: productRows(today, limit),
+            products_week: productRows(week, limit),
+            products_month: productRows(month, limit),
+            last_paid: latest ? {
+                username: customerById(latest.customer_id)?.username || null,
+                order_id: latest.id,
+                amount: latest.total,
+                paid_at: latest.completed_at || latest.created_at,
+            } : null,
+        };
+    }
+
+    function productRows(start, limit) {
+        const byName = {};
+        for (const o of DB.orders) {
+            if (o.status !== "paid" || new Date(o.created_at) < start) continue;
+            for (const item of o.items) {
+                const row = byName[item.product_name] || { product: item.product_name, quantity: 0, revenue: 0 };
+                row.quantity += item.quantity;
+                row.revenue += item.quantity * item.unit_price;
+                byName[item.product_name] = row;
+            }
+        }
+        return Object.values(byName)
+            .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue || a.product.localeCompare(b.product))
+            .slice(0, limit)
+            .map((row) => ({ ...row, revenue: Math.round(row.revenue * 100) / 100 }));
     }
 
     function userOut(u) {
@@ -675,6 +744,10 @@
         if (path === "/reports/top-products" && method === "GET") {
             requireAdmin(init);
             return topProducts(Number(query.get("limit")) || 10);
+        }
+        if (path === "/reports/customer-insights" && method === "GET") {
+            requireAdmin(init);
+            return customerInsights(Math.max(1, Math.min(Number(query.get("limit")) || 5, 20)));
         }
         if (path === "/reports/sales-by-day" && method === "GET") {
             requireAdmin(init);

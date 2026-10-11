@@ -151,6 +151,9 @@ class WeekdayAgg(BaseModel):
 
 class CustomerStats(BaseModel):
     orders: int = 0
+    paid_orders: int = 0
+    pending_orders: int = 0
+    cancelled_orders: int = 0
     total_spent: float = 0.0
     total_paid: float = 0.0
     balance: float = 0.0
@@ -158,6 +161,8 @@ class CustomerStats(BaseModel):
     items_bought: int = 0
     first_order_at: Optional[datetime] = None
     last_order_at: Optional[datetime] = None
+    last_paid_at: Optional[datetime] = None
+    last_paid_amount: float = 0.0
     top_item: Optional[str] = None
     top_item_qty: int = 0
     avg_orders_per_month: float = 0.0

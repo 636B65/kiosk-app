@@ -396,6 +396,11 @@ server.listen(PORT, async () => {
       await page.waitForTimeout(700);
       const text = await page.locator("#admin-main-container").textContent();
       if (!text.includes("Outstanding")) throw new Error("no outstanding in reports");
+      if (!text.includes("Customer insights") || !text.includes("Top customers today")) {
+        throw new Error("customer insights missing from reports");
+      }
+      if (!text.includes("Last customer to pay")) throw new Error("last payer insight missing");
+      if (!text.includes("Products bought most today")) throw new Error("product insights missing from reports");
       const stat = await page.locator(".stat-card", { hasText: "Outstanding Balance" }).textContent();
       if (!stat.includes("0,00")) throw new Error("outstanding not cleared: " + stat.replace(/\s+/g, " "));
       return "reports ok";

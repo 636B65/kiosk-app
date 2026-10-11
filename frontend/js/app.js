@@ -267,10 +267,14 @@ function renderCustomerStats(stats) {
     if (!stats) return "";
     const rows = [
         ["Orders", stats.orders],
+        ["Paid / unpaid / cancelled", `${stats.paid_orders} / ${stats.pending_orders} / ${stats.cancelled_orders}`],
         ["Items bought", stats.items_bought],
         ["Most bought", stats.top_item ? `${esc(stats.top_item)} (${stats.top_item_qty})` : "—"],
         ["Total spent", fmt(stats.total_spent)],
         ["Total paid", fmt(stats.total_paid)],
+        ["Last paid", stats.last_paid_at ? new Date(stats.last_paid_at).toLocaleString() : "—"],
+        ["Last payment", stats.last_paid_at ? fmt(stats.last_paid_amount) : "—"],
+        ["Last order", stats.last_order_at ? new Date(stats.last_order_at).toLocaleString() : "—"],
         ["Average order", fmt(stats.avg_order)],
         ["Orders / month", stats.avg_orders_per_month],
         ["Busiest day", esc(stats.busiest_day || "—")],

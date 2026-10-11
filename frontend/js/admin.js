@@ -715,10 +715,11 @@ const Admin = {
     },
 
     async renderReports() {
-        const [summary, topProducts, salesByDay] = await Promise.all([
+        const [summary, topProducts, salesByDay, customerInsights] = await Promise.all([
             API.get("/reports/summary"),
             API.get("/reports/top-products?limit=10"),
             API.get("/reports/sales-by-day?days=14"),
+            API.get("/reports/customer-insights"),
         ]);
         const max = Math.max(...salesByDay.map((d) => d.revenue), 1);
         const revenueByDay = salesByDay.map((d) => ({
@@ -727,6 +728,36 @@ const Admin = {
         }));
         const ordersMax = Math.max(...revenueByDay.map((d) => d.orders), 1);
         const app = document.getElementById("admin-main-container");
+        const customerLeaders = (title, leaders) => `
+            <div class="panel">
+                <div class="panel-header"><h3>${title}</h3></div>
+                <table>
+                    <thead><tr><th>#</th><th>Customer</th><th>Paid orders</th><th>Spent</th></tr></thead>
+                    <tbody>
+                        ${leaders.length === 0
+                            ? '<tr><td colspan="4">No paid orders in this period</td></tr>'
+                            : leaders.map((leader, i) => `
+                                <tr><td>${i + 1}</td><td><strong>${esc(leader.username)}</strong></td><td>${leader.orders}</td><td>${fmt(leader.spent)}</td></tr>
+                            `).join("")}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        const productLeaders = (title, leaders) => `
+            <div class="panel">
+                <div class="panel-header"><h3>${title}</h3></div>
+                <table>
+                    <thead><tr><th>#</th><th>Product</th><th>Units bought</th><th>Sales</th></tr></thead>
+                    <tbody>
+                        ${leaders.length === 0
+                            ? '<tr><td colspan="4">No paid orders in this period</td></tr>'
+                            : leaders.map((product, i) => `
+                                <tr><td>${i + 1}</td><td><strong>${esc(product.product)}</strong></td><td>${product.quantity}</td><td>${fmt(product.revenue)}</td></tr>
+                            `).join("")}
+                    </tbody>
+                </table>
+            </div>
+        `;
         app.innerHTML = `
             <div class="admin-main">
                 <h2>Reports</h2>
@@ -752,6 +783,22 @@ const Admin = {
                         </div>
                     </div>
                 </div>
+                <h3 style="margin:1.5rem 0 0.75rem;">Customer insights</h3>
+                <p style="color:var(--muted); margin:0 0 0.75rem;">Rankings use paid orders in the current calendar day, week (Monday start), and month.</p>
+                <div class="stat-card" style="margin-bottom:1rem;">
+                    <div class="label">Last customer to pay</div>
+                    ${customerInsights.last_paid ? `
+                        <div class="value">${esc(customerInsights.last_paid.username)}</div>
+                        <div class="sub">Order #${customerInsights.last_paid.order_id} · ${fmt(customerInsights.last_paid.amount)} · ${new Date(customerInsights.last_paid.paid_at).toLocaleString()}</div>
+                    ` : '<div class="value">No payments yet</div>'}
+                </div>
+                ${customerLeaders("Top customers today", customerInsights.today)}
+                ${customerLeaders("Top customers this week", customerInsights.week)}
+                ${customerLeaders("Top customers this month", customerInsights.month)}
+                <h3 style="margin:1.5rem 0 0.75rem;">Most purchased products</h3>
+                ${productLeaders("Products bought most today", customerInsights.products_today)}
+                ${productLeaders("Products bought most this week", customerInsights.products_week)}
+                ${productLeaders("Products bought most this month", customerInsights.products_month)}
                 <div class="panel">
                     <div class="panel-header"><h3>Top Products</h3></div>
                     <table>

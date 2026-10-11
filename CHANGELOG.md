@@ -2,6 +2,19 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.21] - 2026-10-11
+
+### Added
+- **Customer and product insights** — Reports now rank the top customers by paid spend and
+  the most purchased products by units sold for the current day, Monday-start week, and
+  month. Reports also show the last customer to pay, and customer history includes
+  payment-status counts plus the last payment and order details. The GitHub Pages demo
+  mirrors the new report data.
+
+### Tests
+- All backend tests (44), the full e2e suite (26 steps), ruff, mypy, and JS syntax
+  validation pass.
+
 ## [1.0.20] - 2026-10-08
 
 ### Fixed
