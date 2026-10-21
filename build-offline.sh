@@ -63,9 +63,14 @@ docker buildx build \
   ./backend
 gzip -f "$BUNDLE/kiosk-backend.tar"
 
+APP_VERSION="$(git describe --tags --always 2>/dev/null | sed 's/^v//' || echo dev)"
+GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
 docker buildx build \
   --platform "$PLATFORM" \
   --output type=docker,dest="$BUNDLE/kiosk-frontend.tar" \
+  --build-context repo=. \
+  --build-arg APP_VERSION="${APP_VERSION:-dev}" \
+  --build-arg GIT_COMMIT="$GIT_COMMIT" \
   ./frontend
 gzip -f "$BUNDLE/kiosk-frontend.tar"
 

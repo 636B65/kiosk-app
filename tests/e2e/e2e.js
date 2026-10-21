@@ -50,13 +50,16 @@ function waitForBackend(retries = 60) {
 const MIME = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
   ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json",
+  ".md": "text/markdown; charset=utf-8",
 };
 
 function staticHandler(req, res) {
   let urlPath = decodeURIComponent(req.url.split("?")[0]);
   if (urlPath === "/") urlPath = "/index.html";
-  const file = path.join(FRONT, urlPath);
-  if (!file.startsWith(FRONT)) { res.writeHead(403); return res.end(); }
+  // The Docker image copies the repo-root CHANGELOG.md next to index.html.
+  const changelog = urlPath === "/CHANGELOG.md";
+  const file = changelog ? path.join(REPO, "CHANGELOG.md") : path.join(FRONT, urlPath);
+  if (!changelog && !file.startsWith(FRONT)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end("Not found"); }
     res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream" });
@@ -161,6 +164,18 @@ server.listen(PORT, async () => {
       const price = await page.locator(".product-price").first().textContent();
       if (!price.includes("€")) throw new Error("not EUR: " + price);
       return price.trim();
+    });
+
+    await step("customer: footer shows release and opens changelog", async () => {
+      const version = (await page.locator("#app-version").textContent()).trim();
+      if (!version.startsWith("Kiosk ")) throw new Error("no release in footer: " + version);
+      await page.locator('.app-footer [data-action="show-changelog"]').click();
+      await page.waitForSelector(".changelog h3");
+      const first = (await page.locator(".changelog h3").first().textContent()).trim();
+      if (!/^\[\d+\.\d+\.\d+\]/.test(first)) throw new Error("unexpected changelog heading: " + first);
+      await page.locator('#modal-overlay [data-action="modal-close"]').click();
+      await page.waitForSelector("#modal-overlay", { state: "detached" });
+      return `${version}; latest ${first}`;
     });
 
     await step("customer: add to cart (no tax line)", async () => {

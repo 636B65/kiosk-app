@@ -3,7 +3,7 @@ name: Deploy frontend demo to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ["frontend/**"]
+    paths: ["frontend/**", "CHANGELOG.md"]
   workflow_dispatch:
 
 permissions:
@@ -27,6 +27,12 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
+
+      - name: Add changelog and release info for the footer
+        run: |
+          cp CHANGELOG.md frontend/CHANGELOG.md
+          version="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
+          printf '{"version": "%s", "commit": "%s"}\n' "${version:-dev}" "$GITHUB_SHA" > frontend/version.json
 
       - name: Upload frontend as Pages artifact
         uses: actions/upload-pages-artifact@v5
