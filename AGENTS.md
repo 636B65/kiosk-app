@@ -190,6 +190,9 @@ a token without those scopes gets HTTP 401/403 from the Packages API.
     reload when a prior step intentionally left the cart populated.
   - Any new customer-facing toast or new admin table column usually means updating e2e.js
     (balance is `td:nth(6)`; the unpaid-block toast text must match `orders.py` detail).
+  - Any browser console/page error fails the e2e run unless it matches `expectedErrors` in
+    e2e.js (the overdue-checkout 403 and the `ghost_user_x` lookup 404). A new step that
+    intentionally triggers an error response must add a narrow pattern there.
 - Local Python is frequently newer than 3.12; the pinned `requirements.txt` wheels may lack
   compatibility → install first `fastapi pydantic sqlalchemy uvicorn python-multipart
   pyjwt bcrypt pytest ruff mypy` as latest (loose) when developing locally, but never change

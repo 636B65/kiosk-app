@@ -73,8 +73,7 @@ async function main() {
     check(loggedIn, "admin login succeeds over https");
   }
 
-  const pageErrors = errors.filter((m) => !m.includes("favicon"));
-  check(pageErrors.length === 0, "no console/page errors" + (pageErrors.length ? ": " + pageErrors.join(" | ") : ""));
+  check(errors.length === 0, "no console/page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
 
   await browser.close();
   process.exit(failures === 0 ? 0 : 1);

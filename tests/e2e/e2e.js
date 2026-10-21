@@ -101,7 +101,11 @@ server.listen(PORT, async () => {
   });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const errors = [];
-  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    const url = m.location()?.url;
+    errors.push(url ? `${m.text()} [${url}]` : m.text());
+  });
   page.on("pageerror", (e) => errors.push("PAGEERROR: " + e.message));
 
   const results = [];
@@ -628,6 +632,17 @@ server.listen(PORT, async () => {
   console.log("\n" + results.join("\n"));
   console.log("\nConsole/page errors:");
   console.log(errors.length ? errors.join("\n") : "(none)");
+  // Steps that intentionally hit an error response: the overdue checkout block (403)
+  // and the unknown-user lookup (404). Anything else is a real failure.
+  const expectedErrors = [
+    /status of 403 .*\/api\/orders\]$/,
+    /status of 404 .*\/api\/customers\/ghost_user_x\]$/,
+  ];
+  const unexpected = errors.filter((e) => !expectedErrors.some((re) => re.test(e)));
+  if (unexpected.length) {
+    results.push("FAIL  unexpected console/page errors — " + unexpected.join(" | "));
+    console.log("FAIL  unexpected console/page errors: " + unexpected.length);
+  }
   const fails = results.filter((r) => r.startsWith("FAIL"));
   process.exit(fails.length ? 1 : 0);
 });

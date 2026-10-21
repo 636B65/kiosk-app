@@ -28,6 +28,7 @@ test fixtures, environment requirements, and repository-specific gotchas.
   temporary database/ports for local concurrent runs to avoid contaminating other work.
 - Diagnose failures from their first meaningful error. Fix failures caused by the change;
   do not hide them, weaken assertions, or report partial runs as passing.
-- Treat 404/403 messages in browser console in context: the harness can intentionally
-  exercise unknown resources and unauthenticated endpoints.
+- The e2e harness fails on any browser console/page error not listed in its
+  `expectedErrors` allowlist (intentional 403/404 steps). Fix unexpected errors instead of
+  widening the allowlist; add a narrow pattern only for a new intentional error step.
 - Summarize which checks passed and disclose skipped or unavailable checks.

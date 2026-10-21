@@ -2,6 +2,23 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.30] - 2026-10-21
+
+### Fixed
+- Added an inline SVG favicon, so browsers and kiosks no longer request a missing
+  `/favicon.ico` (404) on every load. Uses a `data:` URI, which the existing CSP allows.
+
+### Changed
+- The e2e harness now fails on unexpected browser console/page errors (only the two
+  intentional 403/404 steps are allowlisted) and logs the URL of each failed request.
+- The HTTPS smoke test no longer ignores favicon errors.
+- `AGENTS.md` and the `kiosk-testing` skill document the console-error gate.
+
+### Tests
+- All backend tests (49), E2E (31 steps, no unexpected console errors), Ruff, mypy, and
+  JavaScript syntax pass on the Python 3.12 `.venv` with pinned requirements; agent skill
+  copies verified identical. The Docker + TLS smoke job runs in CI.
+
 ## [1.0.29] - 2026-10-21
 
 ### Added
