@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import uuid
+from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -527,6 +528,109 @@ def test_reports_reflect_paid_after_reset(client, admin_headers):
     assert summ["today"]["revenue"] > 0
     top = client.get("/api/reports/top-products?limit=3", headers=admin_headers).json()
     assert len(top) <= 3
+
+
+def test_customer_insights_rank_by_payment_date(client, admin_headers):
+    from database import SessionLocal
+    from models import Order
+    from timeutil import utcnow
+
+    settled_late = f"settled_late_{uuid.uuid4().hex[:8]}"
+    settled_early = f"settled_early_{uuid.uuid4().hex[:8]}"
+    settled_control = f"settled_control_{uuid.uuid4().hex[:8]}"
+    ranking_product = client.post(
+        "/api/products",
+        headers=admin_headers,
+        json={
+            "name": f"Ranking Test {uuid.uuid4().hex[:8]}",
+            "price": 100,
+            "stock": 10,
+        },
+    )
+    assert ranking_product.status_code == 201, ranking_product.text
+    order_ids = {}
+    for username, quantity in (
+        (settled_late, 3),
+        (settled_early, 3),
+        (settled_control, 1),
+    ):
+        response = client.post(
+            "/api/orders",
+            json={
+                "customer_username": username,
+                "items": [
+                    {"product_id": ranking_product.json()["id"], "quantity": quantity}
+                ],
+            },
+        )
+        assert response.status_code == 201, response.text
+        order_id = response.json()["id"]
+        paid = client.patch(
+            f"/api/orders/{order_id}/status?new_status=paid",
+            headers=admin_headers,
+        )
+        assert paid.status_code == 200, paid.text
+        order_ids[username] = order_id
+
+    now = utcnow()
+    with SessionLocal() as db:
+        late_order = db.get(Order, order_ids[settled_late])
+        early_order = db.get(Order, order_ids[settled_early])
+        control_order = db.get(Order, order_ids[settled_control])
+        late_order.created_at = now - timedelta(days=60)
+        late_order.completed_at = now - timedelta(minutes=1)
+        early_order.created_at = now
+        early_order.completed_at = now - timedelta(days=60)
+        control_order.completed_at = now - timedelta(minutes=2)
+        db.commit()
+
+    insights = client.get(
+        "/api/reports/customer-insights?limit=20", headers=admin_headers
+    ).json()
+    for period in ("today", "week", "month"):
+        usernames = [row["username"] for row in insights[period]]
+        assert settled_late in usernames
+        assert settled_early not in usernames
+        assert usernames.index(settled_late) < usernames.index(settled_control)
+
+
+def test_customer_self_service_payment_is_admin_enabled(
+    client, products, admin_headers
+):
+    username = f"selfpay_{uuid.uuid4().hex[:8]}"
+    order = client.post(
+        "/api/orders",
+        json={
+            "customer_username": username,
+            "items": [{"product_id": products[0]["id"], "quantity": 1}],
+        },
+    )
+    assert order.status_code == 201, order.text
+    path = f"/api/customers/{username}/self-mark-paid"
+    setting_path = "/api/settings/customer_self_service_payment"
+    try:
+        disabled = client.post(path, json={})
+        assert disabled.status_code == 403
+
+        enabled = client.put(
+            setting_path,
+            headers=admin_headers,
+            json={"key": "customer_self_service_payment", "value": "true"},
+        )
+        assert enabled.status_code == 200, enabled.text
+        paid = client.post(path, json={})
+        assert paid.status_code == 200, paid.text
+        assert paid.json()["settled"] == 1
+
+        history = client.get(f"/api/customers/{username}").json()
+        assert history["balance"] == pytest.approx(0)
+        assert history["orders"][0]["status"] == "paid"
+    finally:
+        client.put(
+            setting_path,
+            headers=admin_headers,
+            json={"key": "customer_self_service_payment", "value": "false"},
+        )
 
 
 def test_reports_csv_exports_stock_balances_and_report_statistics(

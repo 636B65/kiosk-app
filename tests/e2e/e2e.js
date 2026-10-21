@@ -132,6 +132,22 @@ server.listen(PORT, async () => {
     if (!res.ok) throw new Error("failed to set payment_due_date: " + res.status);
   }
 
+  async function setCustomerSelfServicePayment(value) {
+    const login = await fetch(`http://${BACKEND}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: process.env.E2E_ADMIN_PASSWORD || "test-admin-password" }),
+    });
+    if (!login.ok) throw new Error("admin login failed: " + login.status);
+    const { access_token } = await login.json();
+    const res = await fetch(`http://${BACKEND}/api/settings/customer_self_service_payment`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${access_token}` },
+      body: JSON.stringify({ key: "customer_self_service_payment", value }),
+    });
+    if (!res.ok) throw new Error("failed to set customer self-service payment: " + res.status);
+  }
+
   try {
     // ---- CUSTOMER FLOW ----
     await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
@@ -522,6 +538,59 @@ server.listen(PORT, async () => {
       const amount = parseFloat(bal[1].replace(/[^\d,]/g, "").replace(",", "."));
       if (!(amount > 3.49)) throw new Error("tab did not stack: balance " + bal[1]);
       return `stacked, balance ${bal[1].trim()}`;
+    });
+
+    await step("customer: admin-enabled self-payment clears all unpaid orders", async () => {
+      try {
+        await setCustomerSelfServicePayment("true");
+        await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+        await page.waitForSelector(".product-card");
+        await page.locator("#lookup-btn").click();
+        await page.waitForSelector("#lookup-form");
+        await page.fill("#lk-username", "alice");
+        await page.locator("#lookup-form button[type=submit]").click();
+        await page.waitForSelector('[data-action="kiosk-mark-all-paid"]');
+        await page.locator('[data-action="kiosk-mark-all-paid"]').click();
+        await page.locator("#confirm-self-payment").click();
+        await page.waitForFunction(() =>
+          document.querySelector("#modal-overlay")?.textContent.includes("No outstanding balance")
+        );
+        return "all pending orders marked paid";
+      } finally {
+        await setCustomerSelfServicePayment("false");
+      }
+    });
+
+    await step("admin: settings expose self-payment opt-in warning", async () => {
+      await page.goto(`http://127.0.0.1:${PORT}/#admin/settings`, { waitUntil: "networkidle" });
+      await page.waitForSelector("#s-customer_self_service_payment");
+      const checkbox = page.locator("#s-customer_self_service_payment");
+      if (await checkbox.isChecked()) throw new Error("self-payment should be disabled after test");
+      const text = await page.locator("#admin-main-container").textContent();
+      if (!text.includes("does not verify identity or payment")) {
+        throw new Error("self-payment warning missing");
+      }
+      await checkbox.evaluate((el) => {
+        el.checked = true;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await page.locator('[data-action="admin-save-settings"]').evaluate((el) => el.click());
+      await page.waitForFunction(async () => {
+        const response = await fetch("/api/settings");
+        const settings = await response.json();
+        return settings.customer_self_service_payment === "true";
+      });
+      await checkbox.evaluate((el) => {
+        el.checked = false;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await page.locator('[data-action="admin-save-settings"]').evaluate((el) => el.click());
+      await page.waitForFunction(async () => {
+        const response = await fetch("/api/settings");
+        const settings = await response.json();
+        return settings.customer_self_service_payment === "false";
+      });
+      return "setting can be enabled and disabled with risk warning";
     });
 
     await step("customer: sees updated store name on fresh load", async () => {

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 from due_dates import get_due_date
-from models import Customer, Order, OrderItem
+from models import Customer, Order, OrderItem, Setting
 from schemas import (
     CustomerHistoryOut,
     CustomerOut,
@@ -202,13 +202,7 @@ def customer_lookup(username: str, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/{username}/reset-payment")
-def reset_payment(
-    username: str,
-    db: Session = Depends(get_db),
-    _: dict = Depends(get_current_user),
-):
-    customer = find_customer(db, username)
+def settle_pending(db: Session, customer: Customer) -> dict:
     orders = (
         db.query(Order)
         .filter(Order.customer_id == customer.id, Order.status == "pending")
@@ -223,3 +217,22 @@ def reset_payment(
         "settled": len(orders),
         "amount": round(sum(o.total for o in orders), 2),
     }
+
+
+@router.post("/{username}/self-mark-paid")
+def self_mark_paid(username: str, db: Session = Depends(get_db)):
+    setting = db.get(Setting, "customer_self_service_payment")
+    if not setting or setting.value != "true":
+        raise HTTPException(
+            status_code=403, detail="Customer self-service payment is disabled"
+        )
+    return settle_pending(db, find_customer(db, username))
+
+
+@router.post("/{username}/reset-payment")
+def reset_payment(
+    username: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    return settle_pending(db, find_customer(db, username))

@@ -90,6 +90,10 @@ tests/e2e/
 - **Reset payment** (`POST /api/customers/{username}/reset-payment`) marks ALL pending
   orders of a customer as `paid`. Unblocks are: this endpoint, paying orders individually,
   cancelling them, or clearing/moving the due date back into the future.
+- **Customer self-mark-paid** is disabled by default. If an admin enables the
+  `customer_self_service_payment` setting, the public username lookup lets anyone who knows
+  a customer's username mark all of that customer's pending orders as paid. This does not
+  verify identity or receipt of payment; enable it only when that trust model is acceptable.
 - **Admin payment**: `PATCH /api/orders/{id}/status` accepts `pending|paid|cancelled`.
   Cancelling a `pending` order **restores stock**; paid orders can't have stock restored.
 - **Due date**: Setting `payment_due_date` (ISO date `YYYY-MM-DD`, default `""` = no end date).

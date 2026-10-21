@@ -35,4 +35,7 @@ Actions.register("kiosk-new-order", () => {
 Actions.register("kiosk-open-lookup", () => Kiosk.openLookup());
 Actions.register("kiosk-lookup-suggest", (el) => Kiosk.suggestLookup(el));
 Actions.register("kiosk-lookup-pick", (el) => Kiosk.pickLookup(el.dataset.username));
+Actions.register("kiosk-mark-all-paid", (el) =>
+    Kiosk.markAllPaid(decodeURIComponent(el.dataset.username))
+);
 Actions.register("kiosk-search", () => Kiosk.renderProductGrid());

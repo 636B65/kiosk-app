@@ -796,7 +796,7 @@ const Admin = {
                     </div>
                 </div>
                 <h3 style="margin:1.5rem 0 0.75rem;">Customer insights</h3>
-                <p style="color:var(--muted); margin:0 0 0.75rem;">Rankings use paid orders in the current calendar day, week (Monday start), and month.</p>
+                <p style="color:var(--muted); margin:0 0 0.75rem;">Ranked by total paid, then order count, using the payment date in the current day, Monday-start week, and calendar month.</p>
                 <div class="stat-card" style="margin-bottom:1rem;">
                     <div class="label">Last customer to pay</div>
                     ${customerInsights.last_paid ? `
@@ -999,6 +999,17 @@ const Admin = {
                     </div>
                     <div class="form-group">
                         <label style="display:flex; align-items:center; gap:0.5rem;">
+                            <input type="checkbox" id="s-customer_self_service_payment"
+                                ${settings.customer_self_service_payment === "true" ? "checked" : ""}>
+                            Allow customers to mark all their unpaid orders as paid from lookup
+                        </label>
+                        <div style="font-size:0.8rem; color:var(--warning); margin-top:0.25rem;">
+                            This does not verify identity or payment. Anyone who knows a
+                            username can mark that customer's balance as paid.
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex; align-items:center; gap:0.5rem;">
                             <input type="checkbox" id="s-debug_mode" ${Debug.isOn(settings) ? "checked" : ""}>
                             🐞 Debug mode (show load times &amp; verbose info on every site)
                         </label>
@@ -1016,6 +1027,7 @@ const Admin = {
             currency: document.getElementById("s-currency").value,
             debug_mode: document.getElementById("s-debug_mode").checked ? "true" : "false",
             payment_due_date: document.getElementById("s-payment_due_date").value.trim(),
+            customer_self_service_payment: document.getElementById("s-customer_self_service_payment").checked ? "true" : "false",
         };
         try {
             for (const [key, value] of Object.entries(fields)) {

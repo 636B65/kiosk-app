@@ -31,8 +31,10 @@ still running or failing.
 ## Commit, CI, and release
 
 1. Confirm the target branch and latest version tag. Do not overwrite or amend existing
-   commits. Commit the intended changes with a concise message and include:
-   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
+   commits. Commit the intended changes with a concise message and end it with the
+   co-author trailer for the agent doing the work (for example
+   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>` for GitHub
+   Copilot), unless the user or agent instructions specify otherwise.
 2. Push the commit to `main` (or follow the user's requested branch/PR workflow).
 3. Monitor the CI workflow for that exact commit. Wait until the backend API tests,
    end-to-end browser tests, and Docker + TLS smoke test all pass before tagging a release.

@@ -54,6 +54,7 @@
             currency: "EUR",
             payment_due_date: "",
             debug_mode: "false",
+            customer_self_service_payment: "false",
         },
         tokens: {},
         nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100 },
@@ -301,8 +302,9 @@
         let sum = 0, count = 0;
         for (const o of DB.orders) {
             if (o.status !== "paid") continue;
-            if (start && o.created_at < start) continue;
-            if (end && o.created_at >= end) continue;
+            const paidAt = o.completed_at || o.created_at;
+            if (start && paidAt < start) continue;
+            if (end && paidAt >= end) continue;
             sum += o.total;
             count += 1;
         }
@@ -313,16 +315,23 @@
         const now = new Date();
         const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const todayStart = fmtDT(t0);
+        const tomorrowStart = fmtDT(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
         const yStart = fmtDT(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        const weekStart = new Date(t0);
+        weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+        const nextWeek = new Date(weekStart);
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         const lowStock = DB.products
             .filter((p) => p.is_active && p.stock <= 5)
             .sort((a, b) => a.stock - b.stock)
             .map((p) => productOut(p));
         return {
-            today: revenueForPeriod(todayStart),
+            today: revenueForPeriod(todayStart, tomorrowStart),
             yesterday: revenueForPeriod(yStart, todayStart),
-            week: revenueForPeriod(fmtDT(daysAgo(7))),
-            month: revenueForPeriod(fmtDT(daysAgo(30))),
+            week: revenueForPeriod(fmtDT(weekStart), fmtDT(nextWeek)),
+            month: revenueForPeriod(fmtDT(monthStart), fmtDT(nextMonth)),
             all_time: revenueForPeriod(),
             outstanding: Math.round(DB.orders.filter((o) => o.status === "pending").reduce((s, o) => s + o.total, 0) * 100) / 100,
             pending_orders: DB.orders.filter((o) => o.status === "pending").length,
@@ -356,8 +365,9 @@
         const start = fmtDT(daysAgo(days));
         const byDay = {};
         for (const o of DB.orders) {
-            if (o.status !== "paid" || o.created_at < start) continue;
-            const day = (o.created_at || "").slice(0, 10);
+            const paidAt = o.completed_at || o.created_at;
+            if (o.status !== "paid" || paidAt < start) continue;
+            const day = paidAt.slice(0, 10);
             const row = byDay[day] || { orders: 0, revenue: 0 };
             row.orders += 1;
             row.revenue += o.total;
@@ -374,10 +384,11 @@
         const week = new Date(today);
         week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
         const month = new Date(now.getFullYear(), now.getMonth(), 1);
-        const leaderRows = (start) => {
+        const leaderRows = (start, end) => {
             const byCustomer = {};
             for (const o of DB.orders) {
-                if (o.status !== "paid" || new Date(o.created_at) < start) continue;
+                const paidAt = new Date(o.completed_at || o.created_at);
+                if (o.status !== "paid" || paidAt < start || paidAt >= end) continue;
                 const customer = customerById(o.customer_id);
                 if (!customer) continue;
                 const row = byCustomer[customer.username] || { username: customer.username, orders: 0, spent: 0 };
@@ -393,13 +404,18 @@
         const paidOrders = DB.orders.filter((o) => o.status === "paid").sort((a, b) =>
             (a.completed_at || a.created_at).localeCompare(b.completed_at || b.created_at) || a.id - b.id);
         const latest = paidOrders[paidOrders.length - 1];
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const nextWeek = new Date(week);
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        const nextMonth = new Date(month.getFullYear(), month.getMonth() + 1, 1);
         return {
-            today: leaderRows(today),
-            week: leaderRows(week),
-            month: leaderRows(month),
-            products_today: productRows(today, limit),
-            products_week: productRows(week, limit),
-            products_month: productRows(month, limit),
+            today: leaderRows(today, tomorrow),
+            week: leaderRows(week, nextWeek),
+            month: leaderRows(month, nextMonth),
+            products_today: productRows(today, tomorrow, limit),
+            products_week: productRows(week, nextWeek, limit),
+            products_month: productRows(month, nextMonth, limit),
             last_paid: latest ? {
                 username: customerById(latest.customer_id)?.username || null,
                 order_id: latest.id,
@@ -409,10 +425,11 @@
         };
     }
 
-    function productRows(start, limit) {
+    function productRows(start, end, limit) {
         const byName = {};
         for (const o of DB.orders) {
-            if (o.status !== "paid" || new Date(o.created_at) < start) continue;
+            const paidAt = new Date(o.completed_at || o.created_at);
+            if (o.status !== "paid" || paidAt < start || paidAt >= end) continue;
             for (const item of o.items) {
                 const row = byName[item.product_name] || { product: item.product_name, quantity: 0, revenue: 0 };
                 row.quantity += item.quantity;
@@ -499,7 +516,12 @@
                 });
             }
             const start = period === "today" ? today : period === "week" ? week : month;
-            for (const [index, product] of productRows(start, 20).entries()) {
+            const end = period === "today"
+                ? new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+                : period === "week"
+                    ? new Date(week.getFullYear(), week.getMonth(), week.getDate() + 7)
+                    : new Date(month.getFullYear(), month.getMonth() + 1, 1);
+            for (const [index, product] of productRows(start, end, 20).entries()) {
                 add("top_products", {
                     period, record: `rank_${index + 1}`, name: product.product,
                     quantity: product.quantity, amount: product.revenue,
@@ -799,6 +821,26 @@
                 balance: stats.balance, total_paid: stats.total_paid,
                 orders: orders.map((o) => ({ ...orderOut(o), items: orderItems(o) })),
                 stats,
+            };
+        }
+        if (parts.length === 3 && parts[0] === "customers" &&
+            parts[2] === "self-mark-paid" && method === "POST") {
+            if (DB.settings.customer_self_service_payment !== "true") {
+                throw new ApiError(HTTP.FORBIDDEN, "Customer self-service payment is disabled");
+            }
+            const customer = findCustomer(decodeURIComponent(parts[1]));
+            if (!customer) throw new ApiError(HTTP.NOT_FOUND, "Customer not found");
+            const pending = pendingOrdersFor(customer.id);
+            let amount = 0;
+            for (const order of pending) {
+                order.status = "paid";
+                order.completed_at = fmtDT(new Date());
+                amount += order.total;
+            }
+            return {
+                username: customer.username,
+                settled: pending.length,
+                amount: Math.round(amount * 100) / 100,
             };
         }
         if (parts.length === 3 && parts[0] === "customers" && parts[2] === "reset-payment" && method === "POST") {

@@ -17,14 +17,15 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
 def revenue_for_period(db: Session, start: datetime = None, end: datetime = None):
+    paid_at = func.coalesce(Order.completed_at, Order.created_at)
     query = db.query(
         func.count(Order.id),
         func.coalesce(func.sum(Order.total), 0.0),
     ).filter(Order.status == "paid")
     if start:
-        query = query.filter(Order.created_at >= start)
+        query = query.filter(paid_at >= start)
     if end:
-        query = query.filter(Order.created_at < end)
+        query = query.filter(paid_at < end)
     count, total = query.first()
     return {"order_count": count, "revenue": round(total or 0.0, 2)}
 
@@ -39,19 +40,29 @@ def outstanding_total(db: Session) -> float:
 
 
 def top_customers_for_period(
-    db: Session, start: datetime, limit: int
+    db: Session,
+    start: datetime | None,
+    limit: int,
+    end: datetime | None = None,
 ) -> list[dict]:
-    rows = (
+    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+    query = (
         db.query(
             Customer.username,
             func.count(Order.id).label("orders"),
             func.coalesce(func.sum(Order.total), 0.0).label("spent"),
         )
         .join(Order, Order.customer_id == Customer.id)
-        .filter(Order.status == "paid", Order.created_at >= start)
-        .group_by(Customer.id, Customer.username)
+        .filter(Order.status == "paid")
+    )
+    if start:
+        query = query.filter(paid_at >= start)
+    if end:
+        query = query.filter(paid_at < end)
+    rows = (
+        query.group_by(Customer.id, Customer.username)
         .order_by(
-            func.sum(Order.total).desc(),
+            func.coalesce(func.sum(Order.total), 0.0).desc(),
             func.count(Order.id).desc(),
             Customer.username.asc(),
         )
@@ -69,8 +80,12 @@ def top_customers_for_period(
 
 
 def top_products_for_period(
-    db: Session, start: datetime | None, limit: int
+    db: Session,
+    start: datetime | None,
+    limit: int,
+    end: datetime | None = None,
 ) -> list[dict]:
+    paid_at = func.coalesce(Order.completed_at, Order.created_at)
     query = (
         db.query(
             OrderItem.product_name,
@@ -89,7 +104,9 @@ def top_products_for_period(
         )
     )
     if start:
-        query = query.filter(Order.created_at >= start)
+        query = query.filter(paid_at >= start)
+    if end:
+        query = query.filter(paid_at < end)
     rows = query.limit(limit).all()
     return [
         {
@@ -109,8 +126,15 @@ def customer_insights(
 ):
     now = utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today + timedelta(days=1)
     week = today - timedelta(days=today.weekday())
+    next_week = week + timedelta(days=7)
     month = today.replace(day=1)
+    next_month = (
+        month.replace(year=month.year + 1, month=1)
+        if month.month == 12
+        else month.replace(month=month.month + 1)
+    )
     last_paid = (
         db.query(
             Customer.username,
@@ -127,12 +151,12 @@ def customer_insights(
         .first()
     )
     return {
-        "today": top_customers_for_period(db, today, limit),
-        "week": top_customers_for_period(db, week, limit),
-        "month": top_customers_for_period(db, month, limit),
-        "products_today": top_products_for_period(db, today, limit),
-        "products_week": top_products_for_period(db, week, limit),
-        "products_month": top_products_for_period(db, month, limit),
+        "today": top_customers_for_period(db, today, limit, tomorrow),
+        "week": top_customers_for_period(db, week, limit, next_week),
+        "month": top_customers_for_period(db, month, limit, next_month),
+        "products_today": top_products_for_period(db, today, limit, tomorrow),
+        "products_week": top_products_for_period(db, week, limit, next_week),
+        "products_month": top_products_for_period(db, month, limit, next_month),
         "last_paid": (
             {
                 "username": last_paid.username,
@@ -149,15 +173,24 @@ def customer_insights(
 @router.get("/summary")
 def summary(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     now = utcnow()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week = today - timedelta(days=today.weekday())
+    next_week = week + timedelta(days=7)
+    month = today.replace(day=1)
+    next_month = (
+        month.replace(year=month.year + 1, month=1)
+        if month.month == 12
+        else month.replace(month=month.month + 1)
+    )
     return {
-        "today": revenue_for_period(db, start=now.replace(hour=0, minute=0, second=0)),
+        "today": revenue_for_period(db, start=today, end=today + timedelta(days=1)),
         "yesterday": revenue_for_period(
             db,
-            start=(now - timedelta(days=1)).replace(hour=0, minute=0, second=0),
-            end=now.replace(hour=0, minute=0, second=0),
+            start=today - timedelta(days=1),
+            end=today,
         ),
-        "week": revenue_for_period(db, start=now - timedelta(days=7)),
-        "month": revenue_for_period(db, start=now - timedelta(days=30)),
+        "week": revenue_for_period(db, start=week, end=next_week),
+        "month": revenue_for_period(db, start=month, end=next_month),
         "all_time": revenue_for_period(db),
         "outstanding": outstanding_total(db),
         "pending_orders": db.query(Order).filter(Order.status == "pending").count(),
@@ -206,15 +239,17 @@ def sales_by_day(
     db: Session = Depends(get_db),
 ):
     start = utcnow() - timedelta(days=days)
+    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+    paid_day = func.date(paid_at)
     rows = (
         db.query(
-            func.date(Order.created_at).label("day"),
+            paid_day.label("day"),
             func.count(Order.id),
             func.coalesce(func.sum(Order.total), 0.0),
         )
-        .filter(Order.status == "paid", Order.created_at >= start)
-        .group_by(func.date(Order.created_at))
-        .order_by(func.date(Order.created_at))
+        .filter(Order.status == "paid", paid_at >= start)
+        .group_by(paid_day)
+        .order_by(paid_day)
         .all()
     )
     return [
@@ -227,7 +262,13 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
     now = utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week = today - timedelta(days=today.weekday())
+    next_week = week + timedelta(days=7)
     month = today.replace(day=1)
+    next_month = (
+        month.replace(year=month.year + 1, month=1)
+        if month.month == 12
+        else month.replace(month=month.month + 1)
+    )
     last_14_days = now - timedelta(days=14)
 
     output = io.StringIO(newline="")
@@ -287,7 +328,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
         writer.writerow(safe_values)
 
     for period, start, end in (
-        ("today", today, None),
+        ("today", today, today + timedelta(days=1)),
         ("yesterday", today - timedelta(days=1), today),
         ("last_7_days", now - timedelta(days=7), None),
         ("last_30_days", now - timedelta(days=30), None),
@@ -387,15 +428,17 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
             details=f"category: {category}; value at current selling price",
         )
 
+    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+    paid_day = func.date(paid_at)
     for day in (
         db.query(
-            func.date(Order.created_at).label("day"),
+            paid_day.label("day"),
             func.count(Order.id),
             func.coalesce(func.sum(Order.total), 0.0),
         )
-        .filter(Order.status == "paid", Order.created_at >= last_14_days)
-        .group_by(func.date(Order.created_at))
-        .order_by(func.date(Order.created_at))
+        .filter(Order.status == "paid", paid_at >= last_14_days)
+        .group_by(paid_day)
+        .order_by(paid_day)
         .all()
     ):
         write_row(
@@ -406,8 +449,14 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
             details="paid orders and revenue",
         )
 
-    for period, start in (("today", today), ("week", week), ("month", month)):
-        for rank, customer in enumerate(top_customers_for_period(db, start, 20), 1):
+    for period, start, end in (
+        ("today", today, today + timedelta(days=1)),
+        ("week", week, next_week),
+        ("month", month, next_month),
+    ):
+        for rank, customer in enumerate(
+            top_customers_for_period(db, start, 20, end), 1
+        ):
             write_row(
                 "top_customers",
                 period=period,
@@ -416,7 +465,9 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
                 count=customer["orders"],
                 amount=customer["spent"],
             )
-        for rank, product in enumerate(top_products_for_period(db, start, 20), 1):
+        for rank, product in enumerate(
+            top_products_for_period(db, start, 20, end), 1
+        ):
             write_row(
                 "top_products",
                 period=period,

@@ -2,6 +2,29 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.29] - 2026-10-21
+
+### Added
+- Optional customer self-service payment (`customer_self_service_payment` setting, off by
+  default). When an admin enables it, the kiosk lookup shows "I have paid everything",
+  which marks all of that customer's pending orders as paid via
+  `POST /api/customers/{username}/self-mark-paid` (403 while disabled). The admin setting
+  warns that this does not verify identity or payment. Mirrored in the browser demo.
+
+### Changed
+- Sales reports, leaderboards, daily sales, and CSV export now use the payment date
+  (`completed_at`, falling back to `created_at`) instead of the order date.
+- Dashboard and insight periods are bounded calendar periods: today, Monday-start week,
+  and calendar month (previously rolling 7/30 days for week/month), so future-dated
+  payments no longer leak into the current period.
+- The `kiosk-release` agent skill now asks for the working agent's own co-author trailer
+  instead of always using the Copilot one.
+
+### Tests
+- All backend tests (49), E2E (31 steps), Ruff, mypy, and JavaScript syntax pass;
+  agent skill copies verified identical.
+  The Docker + TLS smoke job runs in CI (no local Docker daemon).
+
 ## [1.0.28] - 2026-10-11
 
 ### Added

@@ -48,6 +48,8 @@ sample data. Everything lives in your browser and **resets on reload**.
   recent payment insights, and CSV export of inventory, customer balances, and report data
   (inventory value is estimated using current selling prices, not product cost)
 - User management (admin accounts)
+- Optional customer self-service payment: when enabled in Settings, the kiosk lookup
+  offers "I have paid everything" (off by default; it does not verify identity or payment)
 
 ## Architecture
 

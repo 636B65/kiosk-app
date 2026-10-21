@@ -468,10 +468,43 @@ const Kiosk = {
                     </div>
                 `).join("")}
             <div class="form-actions">
+                ${Store.settings.customer_self_service_payment === "true" && data.balance > 0 ? `
+                    <button class="btn btn-success" data-action="kiosk-mark-all-paid"
+                            data-username="${esc(encodeURIComponent(data.customer.username))}">
+                        I have paid everything
+                    </button>
+                ` : ""}
                 <button class="btn btn-secondary" data-action="modal-close">Close</button>
                 <button class="btn btn-primary" data-action="kiosk-open-lookup">Another user</button>
             </div>
         `);
+    },
+
+    async markAllPaid(username) {
+        Modal.open(`
+            <h2>Confirm payment</h2>
+            <p>Mark all unpaid orders for <strong>${esc(username)}</strong> as paid?</p>
+            <p style="color:var(--warning);">
+                This updates the store balance immediately and does not verify a payment.
+            </p>
+            <div class="form-actions">
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                <button class="btn btn-success" id="confirm-self-payment">Confirm paid</button>
+            </div>
+        `);
+        document.getElementById("confirm-self-payment").addEventListener("click", async () => {
+            try {
+                const result = await API.post(
+                    `/customers/${encodeURIComponent(username)}/self-mark-paid`,
+                    {}
+                );
+                const history = await API.get(`/customers/${encodeURIComponent(username)}`);
+                this.showLookup(history);
+                Toast.success(`${result.settled} order(s) marked paid for ${result.username}`);
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
     },
 
     newOrder() {
