@@ -10,6 +10,9 @@ All notable changes to the Kiosk App are documented in this file.
 - The frontend image writes `version.json` from the `APP_VERSION` / `GIT_COMMIT` build args
   (set by the release workflow, `compose.sh`, and `build-offline.sh`) and ships `CHANGELOG.md`
   via a named `repo` build context. The GitHub Pages demo gets both at deploy time.
+- `publish-images.yml` now creates the GitHub Release automatically once both images are
+  published, using the tag's CHANGELOG.md section as release notes plus a "Full Changelog"
+  compare link. `AGENTS.md` and the `kiosk-release` skill no longer ask for a manual release.
 
 ### Tests
 - E2E checks the footer and the changelog dialog; the Docker + TLS smoke job checks that

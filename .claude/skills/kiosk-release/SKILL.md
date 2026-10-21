@@ -7,8 +7,8 @@ description: Validate, commit, push, release, and publish container images for k
 
 Use this skill for changes to this repository. Unless the user explicitly opts out of a
 release step, finish changes by validating them, recording them in the changelog, committing
-and pushing the code, creating a GitHub Release, and publishing the backend and frontend
-container images. Do not report completion while required CI or publishing workflows are
+and pushing the code, tagging, and confirming the GitHub Release and backend and frontend
+container images were published. Do not report completion while required CI or publishing workflows are
 still running or failing.
 
 ## Before committing
@@ -41,12 +41,14 @@ still running or failing.
    If CI fails, diagnose and fix the issue, push the fix, and wait for CI again.
 4. Create and push a new `vX.Y.Z` tag only after main CI succeeds. Use the repository's
    next-version convention and never reuse a tag.
-5. Create a GitHub Release for the tag. Do not attach source assets unless requested.
-6. Wait for the tag-triggered `Publish container images` workflow to succeed for both
-   backend and frontend. The expected GHCR images are:
+5. Wait for the tag-triggered `Publish container images` workflow to succeed for both
+   backend and frontend and for its `release` job, which creates the GitHub Release from the
+   tag's CHANGELOG.md section. Do not create the release by hand or attach source assets
+   unless requested; if the job fails, fix the cause (usually a missing changelog section)
+   and re-run it. The expected GHCR images are:
    - `ghcr.io/636b65/kiosk/backend:<version>` and `:latest`
    - `ghcr.io/636b65/kiosk/frontend:<version>` and `:latest`
-7. Report the commit, tag/release, CI result, and image-publishing result. Clearly state
+6. Report the commit, tag/release, CI result, and image-publishing result. Clearly state
    anything that remains pending or blocked.
 
 ## Operational notes
