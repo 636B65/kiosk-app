@@ -37,15 +37,17 @@ still running or failing.
    Copilot), unless the user or agent instructions specify otherwise.
 2. Push the commit to `main` (or follow the user's requested branch/PR workflow).
 3. Monitor the CI workflow for that exact commit. Wait until the backend API tests,
-   end-to-end browser tests, and Docker + TLS smoke test all pass before tagging a release.
+   end-to-end browser tests, and Docker + TLS smoke test all pass.
    If CI fails, diagnose and fix the issue, push the fix, and wait for CI again.
-4. Create and push a new `vX.Y.Z` tag only after main CI succeeds. Use the repository's
-   next-version convention and never reuse a tag.
-5. Wait for the tag-triggered `Publish container images` workflow to succeed for both
-   backend and frontend and for its `release` job, which creates the GitHub Release from the
-   tag's CHANGELOG.md section. Do not create the release by hand or attach source assets
-   unless requested; if the job fails, fix the cause (usually a missing changelog section)
-   and re-run it. The expected GHCR images are:
+4. Do not tag by hand. Once main CI succeeds, the `Release` workflow tags the tested commit
+   with the newest CHANGELOG.md version (if that tag does not exist yet) and calls
+   `Publish container images`. Use the repository's next-version convention in
+   CHANGELOG.md and never reuse a version.
+5. Wait for the `Release` workflow run to succeed: its tag job, both image builds, and the
+   `release` job that creates the GitHub Release from the tag's CHANGELOG.md section. Do
+   not create the release by hand or attach source assets unless requested; if a job fails,
+   fix the cause (usually a missing changelog section) and re-run it. The expected GHCR
+   images are:
    - `ghcr.io/636b65/kiosk/backend:<version>` and `:latest`
    - `ghcr.io/636b65/kiosk/frontend:<version>` and `:latest`
 6. Report the commit, tag/release, CI result, and image-publishing result. Clearly state
