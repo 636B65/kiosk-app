@@ -59,12 +59,13 @@ backend/
   routers/         auth, categories, customers, orders, products, reports, settings, users
   tests/           test_api.py (full API suite) + test_due_dates.py (units)
 frontend/
-  index.html       no <meta> CSP; scripts loaded in fixed order (demo -> api -> app -> customer -> admin -> handlers -> debug)
+  version.json     dev placeholder; the Docker build overwrites it with release + commit
+  index.html       footer (release, commit, Changelog button); no <meta> CSP; scripts loaded in fixed order (demo -> api -> app -> customer -> admin -> handlers -> debug)
   css/             styles.css
   js/
     demo.js        in-browser API mock for the GitHub Pages demo (no-op unless .github.io host or ?demo=1)
     api.js         fetch wrapper + token storage
-    app.js         entry: route handling, Store, Toast, Modal, currency list
+    app.js         entry: route handling, Store, Toast, Modal, AppInfo (footer), currency list
     customer.js    Kiosk cart/checkout + user lookup
     admin.js       admin panel (orders, products, categories, customers, users, settings, reports)
     handlers.js    Actions registry (event delegation)
@@ -130,7 +131,7 @@ tests/e2e/
 
 ## Frontend conventions
 
-- **No build step, no JS modules.** Globals: `Store`, `API`, `Modal`, `Toast`, `Kiosk`,
+- **No build step, no JS modules.** Globals: `Store`, `API`, `Modal`, `Toast`, `AppInfo`, `Kiosk`,
   `Admin`, `Actions`, `Debug`. Script include order in `index.html` defines load order.
 - `demo.js` is a `<script>` hook loaded **before** `api.js`. It is a no-op unless the
   host is `*.github.io` or the URL has `?demo=1`; in demo mode it replaces `window.fetch`
@@ -170,6 +171,13 @@ tests/e2e/
 3. `git tag vX.Y.Z` and push it → `publish-images.yml` builds/pushes GHCR images and you
    create the GitHub Release (no source assets are attached historically).
 4. Version bumps are the only tag-triggered releases; a plain `main` push does NOT rebuild images.
+
+The footer shows the running release and commit from `version.json`, which `frontend/Dockerfile`
+writes from the `APP_VERSION` / `GIT_COMMIT` build args (release workflow: tag version + SHA;
+`compose.sh` / `build-offline.sh`: `git describe` + `git rev-parse`; plain builds: `dev`). The
+Changelog button shows `CHANGELOG.md`, copied from the repo root via the named build context
+`repo` (`additional_contexts` in compose, `--build-context repo=.` for buildx). The Pages workflow
+copies both into `frontend/` before upload, and the e2e harness serves the root `CHANGELOG.md`.
 
 **Note:** the GHCR packages are currently **private** (unauthenticated `docker pull` → 401).
 Making them public requires the `read:packages` + `write:packages` scopes on the `gh` token

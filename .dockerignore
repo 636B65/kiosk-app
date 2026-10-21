@@ -8,3 +8,8 @@ data_old/
 .venv/
 offline/
 *.swp
+
+# The repo root is only used as the named build context "repo" by
+# frontend/Dockerfile, which needs nothing but CHANGELOG.md.
+*
+!CHANGELOG.md

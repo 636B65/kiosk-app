@@ -24,7 +24,14 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # Repo root, used only for CHANGELOG.md (see the root .dockerignore).
+      additional_contexts:
+        repo: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-}
     image: kiosk/frontend
     ports:
       - "80:80"

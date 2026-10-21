@@ -132,6 +132,7 @@ jobs:
       - name: Build and start services (generates self-signed cert)
         env:
           ADMIN_PASSWORD: smoke-test-password
+          GIT_COMMIT: ${{ github.sha }}
         run: docker compose up -d --build
 
       - name: Wait for backend + frontend over TLS
@@ -150,6 +151,12 @@ jobs:
           docker compose exec -T frontend nginx -t
           test -f data/tls/server.crt && test -f data/tls/server.key || { echo "cert not generated"; exit 1; }
           echo "self-signed certificate generated at data/tls/"
+
+      - name: Verify footer release info and changelog are served
+        run: |
+          curl -skf https://localhost/version.json | tee /tmp/version.json
+          grep -q '"commit": "${{ github.sha }}"' /tmp/version.json || { echo "commit missing from version.json"; exit 1; }
+          curl -skf https://localhost/CHANGELOG.md | head -n 1 | grep -q '^# Changelog' || { echo "CHANGELOG.md not served"; exit 1; }
 
       - name: Verify HTTP 80 -> HTTPS 443 redirect
         run: |

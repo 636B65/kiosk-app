@@ -29,6 +29,7 @@ document.addEventListener("DOMContentLoaded", () => {
     Admin.init();
     Actions.init();
     Debug.init();
+    AppInfo.init();
     handleRoute();
     window.addEventListener("hashchange", () => handleRoute());
 });
@@ -112,6 +113,85 @@ const Modal = {
         if (el) el.innerHTML = content;
     },
 };
+
+// Release + commit footer. version.json is written at image build time
+// (frontend/Dockerfile) and CHANGELOG.md is copied in from the repo root.
+const AppInfo = {
+    async init() {
+        const el = document.getElementById("app-version");
+        if (!el) return;
+        try {
+            const res = await fetch("version.json", { cache: "no-store" });
+            if (!res.ok) return;
+            const info = await res.json();
+            const version = info.version || "dev";
+            const commit = String(info.commit || "");
+            el.textContent = `Kiosk ${/^\d/.test(version) ? "v" + version : version}` +
+                (commit ? ` · commit ${commit.slice(0, 7)}` : "");
+            if (commit) el.title = commit;
+        } catch {
+            // Keep the static "Kiosk dev" fallback.
+        }
+    },
+
+    async openChangelog() {
+        Modal.open(`<h2>Changelog</h2><p style="color:var(--muted);">Loading…</p>`);
+        let body;
+        try {
+            const res = await fetch("CHANGELOG.md", { cache: "no-store" });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            body = renderMarkdown(await res.text());
+        } catch (err) {
+            body = `<p>Could not load the changelog (${esc(err.message)}).</p>`;
+        }
+        Modal.fill(`
+            <div class="changelog">${body}</div>
+            <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
+                <button class="btn btn-secondary" data-action="modal-close">Close</button>
+            </div>
+        `);
+        document.querySelector("#modal-overlay .modal")?.classList.add("modal-wide");
+    },
+};
+
+// Minimal Markdown -> HTML for CHANGELOG.md: headings, bullet lists (with
+// wrapped continuation lines), paragraphs, `code`, **bold** and [links](url).
+function renderMarkdown(md) {
+    const inline = (s) => esc(s)
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    const out = [];
+    let list = null;
+    let para = null;
+    const flush = () => {
+        if (para) out.push(`<p>${inline(para.join(" "))}</p>`);
+        if (list) out.push(`<ul>${list.map((li) => `<li>${inline(li)}</li>`).join("")}</ul>`);
+        para = null;
+        list = null;
+    };
+    for (const raw of md.split(/\r?\n/)) {
+        const line = raw.trimEnd();
+        const heading = line.match(/^(#{1,4})\s+(.*)$/);
+        const item = line.match(/^\s*[-*]\s+(.*)$/);
+        if (!line.trim()) {
+            flush();
+        } else if (heading) {
+            flush();
+            const level = Math.min(heading[1].length + 1, 5);
+            out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+        } else if (item) {
+            if (para) flush();
+            (list = list || []).push(item[1]);
+        } else if (list) {
+            list[list.length - 1] += " " + line.trim();
+        } else {
+            (para = para || []).push(line.trim());
+        }
+    }
+    flush();
+    return out.join("\n");
+}
 
 const SUPPORTED_CURRENCIES = {
     AED: "UAE Dirham",
