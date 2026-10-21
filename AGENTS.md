@@ -12,8 +12,10 @@ check out on a "tab" under their username, and the **staff mark orders as paid l
 - Frontend: **vanilla JS, no framework/build step** (plain `<script>` tags), served by `nginx:alpine` behind **self-signed TLS**.
 - Tests: pytest (backend) + a zero-dependency Playwright harness (e2e, uses system Chromium).
 - CI: 3 jobs — Backend API tests, End-to-end browser tests, Docker + TLS smoke (`ci.yml`).
-- Releases: every `v*` tag triggers `publish-images.yml`, which creates the GitHub Release and builds and pushes
-  `ghcr.io/636b65/kiosk/backend` and `.../frontend` images. The `docker/metadata-action`
+- Releases: when CI on `main` is green and the newest `CHANGELOG.md` version has no tag yet,
+  `release.yml` creates the `vX.Y.Z` tag and calls `publish-images.yml` (also run by any pushed
+  `v*` tag), which builds and pushes the `ghcr.io/636b65/kiosk/backend` and `.../frontend`
+  images and then creates the GitHub Release. The `docker/metadata-action`
   semver pattern strips the leading `v`, so tag `v1.0.17` publishes as `1.0.17` + `latest`.
 
 ## Quick commands
@@ -167,12 +169,16 @@ tests/e2e/
 
 1. Bump **CHANGELOG.md** with the new `[x.y.z] - <date>` section and update the test-count line in
    the Tests section.
-2. Commit and push to `main`, then verify CI is green (backends + e2e + Docker/TLS smoke).
-3. `git tag vX.Y.Z` and push it → `publish-images.yml` builds/pushes GHCR images, then its
-   `release` job creates the GitHub Release titled `vX.Y.Z` with the matching CHANGELOG.md
-   section as notes plus a "Full Changelog" compare link (no source assets). The job fails if
-   CHANGELOG.md has no `[x.y.z]` section; re-running it updates an existing release's notes.
-4. Version bumps are the only tag-triggered releases; a plain `main` push does NOT rebuild images.
+2. Commit and push (or merge) to `main`. CI runs (backend + e2e + Docker/TLS smoke).
+3. When that CI run succeeds, `release.yml` (workflow_run on CI) reads the newest
+   `## [x.y.z]` heading in CHANGELOG.md. If `vX.Y.Z` does not exist yet, it tags the tested
+   commit and calls `publish-images.yml`, which builds/pushes the GHCR images and then creates
+   the GitHub Release titled `vX.Y.Z` with that CHANGELOG.md section as notes plus a
+   "Full Changelog" compare link (no source assets). Do not tag by hand.
+4. A `main` push whose newest CHANGELOG.md version is already tagged releases nothing, so do
+   not add a new version heading until the change is ready to ship. `release.yml` can also be
+   run manually (workflow_dispatch on `main`); pushing a `v*` tag by hand still runs
+   `publish-images.yml` directly. Re-running the `release` job updates an existing release's notes.
 
 The footer shows the running release and commit from `version.json`, which `frontend/Dockerfile`
 writes from the `APP_VERSION` / `GIT_COMMIT` build args (release workflow: tag version + SHA;

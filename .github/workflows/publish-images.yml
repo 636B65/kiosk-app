@@ -1,9 +1,17 @@
 name: Publish container images
 
+# Runs for a pushed v* tag, or is called by release.yml with the tag it just
+# created (tags pushed with GITHUB_TOKEN do not trigger other workflows).
 on:
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build, e.g. v1.0.31
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,6 +21,7 @@ env:
   REGISTRY: ghcr.io
   # Owner must be lowercase for GHCR.
   IMAGE_BASE: ghcr.io/636b65/kiosk
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   publish:
@@ -28,6 +37,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: Resolve release commit
+        id: rev
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -48,11 +63,11 @@ jobs:
         with:
           images: ${{ env.IMAGE_BASE }}/${{ matrix.image }}
           tags: |
-            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},value=${{ env.TAG }}
             type=raw,value=latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.rev.outputs.sha }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -64,10 +79,11 @@ jobs:
             repo=.
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.version }}
-            GIT_COMMIT=${{ github.sha }}
+            GIT_COMMIT=${{ steps.rev.outputs.sha }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
   release:
     name: Create GitHub Release
     # Only after both images are published, so a release always has its images.
@@ -79,11 +95,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
 
       - name: Extract release notes from CHANGELOG.md
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG#v}"
           notes="$RUNNER_TEMP/notes.md"
           # The "## [x.y.z] - date" section for this tag, up to the next version heading.
           awk -v head="## [$version]" '
@@ -94,10 +111,10 @@ jobs:
             echo "::error::CHANGELOG.md has no [$version] section"
             exit 1
           fi
-          prev="$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_REF_NAME^" 2>/dev/null || true)"
+          prev="$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)"
           if [ -n "$prev" ]; then
             printf '\n**Full Changelog**: %s/%s/compare/%s...%s\n' \
-              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$prev" "$GITHUB_REF_NAME" >> "$notes"
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$prev" "$TAG" >> "$notes"
           fi
           cat "$notes"
 
@@ -105,9 +122,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            gh release create "$GITHUB_REF_NAME" --verify-tag \
-              --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release create "$TAG" --verify-tag \
+              --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
           fi

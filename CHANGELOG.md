@@ -13,6 +13,10 @@ All notable changes to the Kiosk App are documented in this file.
 - `publish-images.yml` now creates the GitHub Release automatically once both images are
   published, using the tag's CHANGELOG.md section as release notes plus a "Full Changelog"
   compare link. `AGENTS.md` and the `kiosk-release` skill no longer ask for a manual release.
+- New `release.yml` workflow: when CI on `main` succeeds and the newest CHANGELOG.md version
+  has no tag yet, it creates the `vX.Y.Z` tag on the tested commit and calls
+  `publish-images.yml` (now also a reusable workflow) to publish the GHCR images and the
+  GitHub Release. Releasing is now just bumping CHANGELOG.md on `main`.
 
 ### Tests
 - E2E checks the footer and the changelog dialog; the Docker + TLS smoke job checks that
