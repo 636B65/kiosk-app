@@ -40,3 +40,12 @@ Actions.register("kiosk-mark-all-paid", (el) =>
     Kiosk.markAllPaid(decodeURIComponent(el.dataset.username))
 );
 Actions.register("kiosk-search", () => Kiosk.renderProductGrid());
+Actions.register("kiosk-idle-continue", () => Kiosk.noteActivity());
+Actions.register("kiosk-buy-again", (el) => Kiosk.buyAgain(parseInt(el.dataset.id)));
+Actions.register("kiosk-open-cart", () => Kiosk.openCartFromModal());
+
+Actions.register("admin-restock", (el) => Admin.openRestockModal(parseInt(el.dataset.id)));
+Actions.register("admin-margins-period", (el) => Admin.renderMargins(el.dataset.period));
+Actions.register("admin-audit-filter", (el) => Admin.renderAuditRows(el.value));
+Actions.register("admin-backup-now", () => Admin.backupNow());
+Actions.register("admin-backup-download", (el) => Admin.downloadBackup(el.dataset.name));

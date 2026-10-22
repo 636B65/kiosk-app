@@ -3,6 +3,7 @@ import os
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -47,7 +48,13 @@ class Product(Base):
     price = Column(Float, nullable=False, default=0.0)
     special_price = Column(Float, nullable=True)
     is_weekly_special = Column(Boolean, default=False)
+    # Optional schedule for the special (inclusive UTC dates); None = open-ended.
+    special_starts_on = Column(Date, nullable=True)
+    special_ends_on = Column(Date, nullable=True)
+    # Latest purchase price per unit, snapshotted onto order lines for margins.
+    cost_price = Column(Float, nullable=True)
     stock = Column(Integer, default=0)
+    low_stock_threshold = Column(Integer, default=5)
     image_path = Column(String, default="")
     is_active = Column(Boolean, default=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
@@ -73,10 +80,23 @@ class Product(Base):
         return None
 
     @property
+    def special_active(self):
+        if not self.is_weekly_special or self.special_price is None:
+            return False
+        today = utcnow().date()
+        if self.special_starts_on and today < self.special_starts_on:
+            return False
+        if self.special_ends_on and today > self.special_ends_on:
+            return False
+        return True
+
+    @property
     def effective_price(self):
-        if self.is_weekly_special and self.special_price is not None:
-            return self.special_price
-        return self.price
+        return self.special_price if self.special_active else self.price
+
+    @property
+    def is_low_stock(self):
+        return bool(self.is_active) and (self.stock or 0) <= (self.low_stock_threshold or 0)
 
 
 class ProductBarcode(Base):
@@ -129,6 +149,7 @@ class OrderItem(Base):
     product_name = Column(String, nullable=False)
     quantity = Column(Integer, default=1)
     unit_price = Column(Float, default=0.0)
+    unit_cost = Column(Float, nullable=True)
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product", back_populates="order_items")
@@ -139,3 +160,31 @@ class Setting(Base):
 
     key = Column(String, primary_key=True)
     value = Column(String, default="")
+
+
+class Restock(Base):
+    __tablename__ = "restocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(
+        Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    product_name = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    unit_cost = Column(Float, nullable=True)
+    stock_after = Column(Integer, nullable=False)
+    note = Column(String, default="")
+    created_by = Column(String, default="")
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    actor = Column(String, nullable=False)
+    action = Column(String, nullable=False, index=True)
+    entity = Column(String, default="")
+    entity_id = Column(String, default="")
+    details = Column(Text, default="")

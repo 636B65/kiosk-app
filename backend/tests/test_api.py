@@ -1017,3 +1017,449 @@ def test_summary_exposes_next_due_date(client, admin_headers):
     assert summ["next_due_date"] is None  # no due date configured by default
     assert "due_day" not in summ
     assert client.get("/api/reports/summary").status_code == 401  # still protected
+
+
+# --------------------------------------------------------------------------- #
+# Purchase prices, restocks, low-stock alerts and margins
+# --------------------------------------------------------------------------- #
+def _new_product(client, admin_headers, **fields):
+    payload = {
+        "name": f"Feature {uuid.uuid4().hex[:8]}",
+        "price": 4.0,
+        "stock": 2,
+        "low_stock_threshold": 3,
+        **fields,
+    }
+    r = client.post("/api/products", json=payload, headers=admin_headers)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _buy(client, username, product_id, quantity=1):
+    r = client.post(
+        "/api/orders",
+        json={
+            "customer_username": username,
+            "items": [{"product_id": product_id, "quantity": quantity}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_seeded_settings_include_idle_and_backup_defaults(client):
+    settings = client.get("/api/settings").json()
+    assert settings["kiosk_idle_seconds"] == "90"
+    assert settings["backup_interval_hours"] == "24"
+    assert settings["backup_keep"] == "7"
+
+
+def test_cost_price_is_only_visible_to_admins(client, admin_headers):
+    product = _new_product(client, admin_headers, cost_price=1.5, barcodes=["cost-secret-1"])
+    assert product["cost_price"] == 1.5
+
+    public = {p["id"]: p for p in client.get("/api/products").json()}
+    assert public[product["id"]]["cost_price"] is None
+    assert all(p["cost_price"] is None for p in public.values())
+    assert client.get(f"/api/products/{product['id']}").json()["cost_price"] is None
+    assert client.get("/api/products/barcode/cost-secret-1").json()["cost_price"] is None
+    # An invalid token is treated as anonymous, not as an error.
+    bad = {"Authorization": "Bearer not-a-token"}
+    assert client.get("/api/products", headers=bad).status_code == 200
+
+    admin = {p["id"]: p for p in client.get("/api/products", headers=admin_headers).json()}
+    assert admin[product["id"]]["cost_price"] == 1.5
+    seeded = [p for p in admin.values() if p["name"] == "Wireless Mouse"]
+    assert seeded and seeded[0]["cost_price"] is not None
+
+
+def test_low_stock_uses_each_products_threshold(client, admin_headers):
+    low = _new_product(client, admin_headers, stock=3, low_stock_threshold=3)
+    high = _new_product(client, admin_headers, stock=4, low_stock_threshold=3)
+    custom = _new_product(client, admin_headers, stock=20, low_stock_threshold=25)
+    summary = client.get("/api/reports/summary", headers=admin_headers).json()
+    alerts = {p["id"]: p for p in summary["low_stock_products"]}
+    assert low["id"] in alerts
+    assert alerts[low["id"]]["low_stock_threshold"] == 3
+    assert high["id"] not in alerts
+    assert custom["id"] in alerts
+    stocks = [p["stock"] for p in summary["low_stock_products"]]
+    assert stocks == sorted(stocks)
+
+    r = client.put(
+        f"/api/products/{custom['id']}", json={"is_active": False}, headers=admin_headers
+    )
+    assert r.status_code == 200
+    summary = client.get("/api/reports/summary", headers=admin_headers).json()
+    assert custom["id"] not in {p["id"] for p in summary["low_stock_products"]}
+    assert client.post(
+        "/api/products", json={"name": "Bad", "low_stock_threshold": -1}, headers=admin_headers
+    ).status_code == 422
+
+
+def test_restock_adds_stock_logs_delivery_and_updates_cost(client, admin_headers):
+    product = _new_product(client, admin_headers, stock=2, low_stock_threshold=3)
+    path = f"/api/products/{product['id']}/restock"
+
+    assert client.post(path, json={"quantity": 5}).status_code == 401
+    assert client.post(path, json={"quantity": 0}, headers=admin_headers).status_code == 422
+    assert client.post(
+        path, json={"quantity": 1, "unit_cost": -1}, headers=admin_headers
+    ).status_code == 422
+    assert client.post(
+        "/api/products/999999/restock", json={"quantity": 1}, headers=admin_headers
+    ).status_code == 404
+
+    r = client.post(
+        path,
+        json={"quantity": 10, "unit_cost": 2.5, "note": "  weekly delivery  "},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201, r.text
+    restock = r.json()
+    assert restock["quantity"] == 10
+    assert restock["unit_cost"] == 2.5
+    assert restock["stock_after"] == 12
+    assert restock["note"] == "weekly delivery"
+    assert restock["created_by"] == "admin"
+
+    # A delivery without a price keeps the last known purchase price.
+    r = client.post(path, json={"quantity": 3}, headers=admin_headers)
+    assert r.status_code == 201
+    assert r.json()["stock_after"] == 15
+
+    updated = client.get(f"/api/products/{product['id']}", headers=admin_headers).json()
+    assert updated["stock"] == 15
+    assert updated["cost_price"] == 2.5
+    summary = client.get("/api/reports/summary", headers=admin_headers).json()
+    assert product["id"] not in {p["id"] for p in summary["low_stock_products"]}
+
+    history = client.get(
+        f"/api/products/{product['id']}/restocks", headers=admin_headers
+    ).json()
+    assert [h["quantity"] for h in history] == [3, 10]
+    recent = client.get("/api/restocks?limit=5", headers=admin_headers).json()
+    assert recent[0]["product_id"] == product["id"]
+    assert client.get("/api/restocks").status_code == 401
+
+    entries = client.get(
+        "/api/audit?action=product.restock", headers=admin_headers
+    ).json()
+    assert entries[0]["entity_id"] == str(product["id"])
+    assert entries[0]["actor"] == "admin"
+    assert "+3" in entries[0]["details"]
+
+
+def test_orders_snapshot_cost_for_margin_report(client, admin_headers):
+    product = _new_product(client, admin_headers, price=5.0, stock=20, cost_price=2.0)
+    uncosted = _new_product(client, admin_headers, price=3.0, stock=20)
+    order = _buy(client, "margin_tester", product["id"], 2)
+    other = _buy(client, "margin_tester", uncosted["id"], 1)
+    pending = _buy(client, "margin_tester", product["id"], 1)
+    for o in (order, other):
+        assert client.patch(
+            f"/api/orders/{o['id']}/status?new_status=paid", headers=admin_headers
+        ).status_code == 200
+
+    # Changing the purchase price later must not rewrite past margins.
+    client.put(f"/api/products/{product['id']}", json={"cost_price": 4.5}, headers=admin_headers)
+
+    report = client.get("/api/reports/margins?period=all", headers=admin_headers).json()
+    rows = {r["product"]: r for r in report["products"]}
+    row = rows[product["name"]]
+    assert row["quantity"] == 2  # the pending order is not counted
+    assert row["revenue"] == 10.0
+    assert row["cost"] == 4.0
+    assert row["margin"] == 6.0
+    assert row["margin_pct"] == 60.0
+    assert row["uncosted_quantity"] == 0
+    no_cost = rows[uncosted["name"]]
+    assert no_cost["margin_pct"] is None
+    assert no_cost["uncosted_quantity"] == 1
+    assert report["totals"]["revenue"] >= 13.0
+
+    month = client.get("/api/reports/margins?period=month", headers=admin_headers).json()
+    assert product["name"] in {r["product"] for r in month["products"]}
+    assert client.get("/api/reports/margins?period=year", headers=admin_headers).status_code == 422
+    assert client.get("/api/reports/margins").status_code == 401
+    summary = client.get("/api/reports/summary", headers=admin_headers).json()
+    assert summary["margin_month"]["margin"] >= 6.0
+
+    # Unit cost stays private: order lines in the public lookup do not expose it.
+    lookup = client.get("/api/customers/margin_tester").json()
+    assert all("unit_cost" not in item for o in lookup["orders"] for item in o["items"])
+    assert pending["status"] == "pending"
+
+    r = client.get("/api/reports/export.csv", headers=admin_headers)
+    rows = list(csv.DictReader(io.StringIO(r.text.lstrip("﻿"))))
+    margins = [x for x in rows if x["section"] == "margins" and x["name"] == product["name"]]
+    assert {x["period"] for x in margins} == {"month", "all_time"}
+    assert all(float(x["amount"]) == 6.0 for x in margins)
+    assert any(x["section"] == "margins" and x["record"] == "store_total" for x in rows)
+    inventory = [x for x in rows if x["section"] == "inventory" and x["name"] == product["name"]]
+    assert "cost price 4.5" in inventory[0]["details"]
+    assert any(x["section"] == "restock_needed" for x in rows)
+
+
+# --------------------------------------------------------------------------- #
+# Time-limited specials
+# --------------------------------------------------------------------------- #
+def test_special_follows_its_schedule(client, admin_headers):
+    from timeutil import utcnow
+
+    today = utcnow().date()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    yesterday = (today - timedelta(days=1)).isoformat()
+    product = _new_product(
+        client,
+        admin_headers,
+        price=10.0,
+        stock=10,
+        is_weekly_special=True,
+        special_price=6.0,
+        special_starts_on=tomorrow,
+    )
+    assert product["special_active"] is False
+    assert _buy(client, "schedule_tester", product["id"])["total"] == 10.0
+
+    r = client.put(
+        f"/api/products/{product['id']}",
+        json={"special_starts_on": yesterday, "special_ends_on": today.isoformat()},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["special_active"] is True
+    public = {p["id"]: p for p in client.get("/api/products").json()}
+    assert public[product["id"]]["special_active"] is True
+    assert _buy(client, "schedule_tester", product["id"])["total"] == 6.0
+
+    r = client.put(
+        f"/api/products/{product['id']}",
+        json={"special_ends_on": yesterday},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["special_active"] is False
+
+    # An end before the start is rejected, also when only one side changes.
+    assert client.put(
+        f"/api/products/{product['id']}",
+        json={"special_starts_on": tomorrow, "special_ends_on": yesterday},
+        headers=admin_headers,
+    ).status_code == 422
+    assert client.put(
+        f"/api/products/{product['id']}",
+        json={"special_starts_on": tomorrow},
+        headers=admin_headers,
+    ).status_code == 422
+    unchanged = client.get(f"/api/products/{product['id']}").json()
+    assert unchanged["special_starts_on"] == yesterday
+    assert client.post(
+        "/api/products",
+        json={"name": "Bad window", "special_starts_on": tomorrow, "special_ends_on": yesterday},
+        headers=admin_headers,
+    ).status_code == 422
+
+    # Clearing both dates makes the special open-ended again.
+    r = client.put(
+        f"/api/products/{product['id']}",
+        json={"special_starts_on": None, "special_ends_on": None},
+        headers=admin_headers,
+    )
+    assert r.json()["special_active"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Audit log
+# --------------------------------------------------------------------------- #
+def test_payment_and_admin_changes_are_audited(client, admin_headers):
+    product = _new_product(client, admin_headers, price=2.0, stock=10)
+    first = _buy(client, "audit_tester", product["id"])
+    second = _buy(client, "audit_tester", product["id"])
+
+    assert client.get("/api/audit").status_code == 401
+
+    client.patch(f"/api/orders/{first['id']}/status?new_status=cancelled", headers=admin_headers)
+    entry = client.get("/api/audit?action=order.", headers=admin_headers).json()[0]
+    assert entry["action"] == "order.cancelled"
+    assert entry["entity_id"] == str(first["id"])
+    assert "pending -> cancelled" in entry["details"]
+    assert "stock restored" in entry["details"]
+
+    client.post("/api/customers/audit_tester/reset-payment", headers=admin_headers)
+    entry = client.get("/api/audit?action=customer.", headers=admin_headers).json()[0]
+    assert entry["action"] == "customer.reset_payment"
+    assert entry["actor"] == "admin"
+    assert f"#{second['id']}" in entry["details"]
+
+    # Nothing pending -> nothing to record.
+    before = len(client.get("/api/audit?action=customer.", headers=admin_headers).json())
+    client.post("/api/customers/audit_tester/reset-payment", headers=admin_headers)
+    assert len(client.get("/api/audit?action=customer.", headers=admin_headers).json()) == before
+
+    _buy(client, "audit_tester", product["id"])
+    client.put(
+        "/api/settings/customer_self_service_payment",
+        json={"key": "customer_self_service_payment", "value": "true"},
+        headers=admin_headers,
+    )
+    try:
+        assert client.post("/api/customers/audit_tester/self-mark-paid").status_code == 200
+    finally:
+        client.put(
+            "/api/settings/customer_self_service_payment",
+            json={"key": "customer_self_service_payment", "value": "false"},
+            headers=admin_headers,
+        )
+    entry = client.get("/api/audit?action=customer.", headers=admin_headers).json()[0]
+    assert entry["action"] == "customer.self_mark_paid"
+    assert entry["actor"] == "kiosk"
+
+    settings_entries = client.get("/api/audit?action=settings.", headers=admin_headers).json()
+    assert settings_entries[0]["entity_id"] == "customer_self_service_payment"
+    assert settings_entries[0]["details"] == "customer_self_service_payment: true -> false"
+    # Saving an unchanged value is not logged.
+    client.put(
+        "/api/settings/customer_self_service_payment",
+        json={"key": "customer_self_service_payment", "value": "false"},
+        headers=admin_headers,
+    )
+    assert len(client.get("/api/audit?action=settings.", headers=admin_headers).json()) == len(
+        settings_entries
+    )
+
+    client.put(f"/api/products/{product['id']}", json={"price": 2.5}, headers=admin_headers)
+    entry = client.get("/api/audit?action=product.update", headers=admin_headers).json()[0]
+    assert "price: 2.0 -> 2.5" in entry["details"]
+
+    r = client.post(
+        "/api/users",
+        json={"username": "audited_user", "password": "audited-password"},
+        headers=admin_headers,
+    )
+    user_id = r.json()["id"]
+    client.put(f"/api/users/{user_id}", json={"password": "another-password"}, headers=admin_headers)
+    client.delete(f"/api/users/{user_id}", headers=admin_headers)
+    actions = [e["action"] for e in client.get("/api/audit?action=user.", headers=admin_headers).json()]
+    assert actions[:3] == ["user.delete", "user.update", "user.create"]
+    log = client.get("/api/audit?limit=1000", headers=admin_headers).json()
+    assert all("another-password" not in e["details"] for e in log)
+    assert len(client.get("/api/audit?limit=2", headers=admin_headers).json()) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Buy again (favorites)
+# --------------------------------------------------------------------------- #
+def test_lookup_lists_most_bought_products_as_favorites(client, admin_headers):
+    a = _new_product(client, admin_headers, name=f"Fav A {uuid.uuid4().hex[:6]}", stock=50)
+    b = _new_product(client, admin_headers, name=f"Fav B {uuid.uuid4().hex[:6]}", stock=50)
+    c = _new_product(client, admin_headers, name=f"Fav C {uuid.uuid4().hex[:6]}", stock=50)
+    gone = _new_product(client, admin_headers, name=f"Fav D {uuid.uuid4().hex[:6]}", stock=50)
+    _buy(client, "favorite_tester", a["id"], 3)
+    _buy(client, "favorite_tester", b["id"], 1)
+    _buy(client, "favorite_tester", gone["id"], 5)
+    cancelled = _buy(client, "favorite_tester", c["id"], 9)
+    client.patch(
+        f"/api/orders/{cancelled['id']}/status?new_status=cancelled", headers=admin_headers
+    )
+    client.put(f"/api/products/{gone['id']}", json={"is_active": False}, headers=admin_headers)
+
+    favorites = client.get("/api/customers/favorite_tester").json()["favorites"]
+    assert [f["product_id"] for f in favorites] == [a["id"], b["id"]]
+    assert favorites[0] == {"product_id": a["id"], "name": a["name"], "quantity": 3}
+
+    for i in range(6):
+        p = _new_product(client, admin_headers, name=f"Fav many {i} {uuid.uuid4().hex[:6]}", stock=5)
+        _buy(client, "favorite_tester", p["id"])
+    assert len(client.get("/api/customers/favorite_tester").json()["favorites"]) == 5
+
+
+# --------------------------------------------------------------------------- #
+# Backups and system status
+# --------------------------------------------------------------------------- #
+def test_backups_create_list_download_and_prune(client, admin_headers):
+    import backups
+    from database import engine
+
+    assert client.post("/api/system/backups").status_code == 401
+    client.put(
+        "/api/settings/backup_keep", json={"key": "backup_keep", "value": "2"}, headers=admin_headers
+    )
+    try:
+        names = []
+        for _ in range(3):
+            r = client.post("/api/system/backups", headers=admin_headers)
+            assert r.status_code == 201, r.text
+            names.append(r.json()["name"])
+        assert len(set(names)) == 3
+
+        info = client.get("/api/system/backups", headers=admin_headers).json()
+        assert info["supported"] is True
+        assert info["keep"] == 2
+        assert info["count"] == 2
+        assert [item["name"] for item in info["items"]] == [names[2], names[1]]
+        assert info["last_backup_at"] is not None
+
+        r = client.get(f"/api/system/backups/{names[2]}", headers=admin_headers)
+        assert r.status_code == 200
+        assert r.content.startswith(b"SQLite format 3")
+        assert client.get(f"/api/system/backups/{names[0]}", headers=admin_headers).status_code == 404
+        assert client.get("/api/system/backups/..%2Fkiosk.db", headers=admin_headers).status_code == 404
+        assert client.get("/api/system/backups/kiosk.db", headers=admin_headers).status_code == 404
+        assert client.get(f"/api/system/backups/{names[2]}").status_code == 401
+
+        actions = [e["action"] for e in client.get("/api/audit?action=backup.", headers=admin_headers).json()]
+        assert actions[0] == "backup.download"
+        assert actions.count("backup.create") == 3
+
+        # The scheduler only acts when a backup is due.
+        scheduler = backups.BackupScheduler(engine, lambda: next(_session()))
+        assert scheduler.run_once() is None  # a backup was just taken
+        assert backups.backup_due(engine, 0) is False
+    finally:
+        client.put(
+            "/api/settings/backup_keep", json={"key": "backup_keep", "value": "7"}, headers=admin_headers
+        )
+        for item in backups.list_backups(engine):
+            os.remove(os.path.join(backups.backup_dir(engine), item["name"]))
+
+
+def _session():
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def test_backup_scheduler_takes_a_backup_when_none_exists(client, admin_headers):
+    import backups
+    from database import SessionLocal, engine
+
+    scheduler = backups.BackupScheduler(engine, SessionLocal)
+    try:
+        assert backups.list_backups(engine) == []
+        result = scheduler.run_once()
+        assert result is not None
+        assert [b["name"] for b in backups.list_backups(engine)] == [result["name"]]
+        assert scheduler.run_once() is None
+    finally:
+        for item in backups.list_backups(engine):
+            os.remove(os.path.join(backups.backup_dir(engine), item["name"]))
+
+
+def test_system_status_reports_health(client, admin_headers):
+    assert client.get("/api/system/status").status_code == 401
+    status = client.get("/api/system/status", headers=admin_headers).json()
+    assert status["version"] == os.environ.get("APP_VERSION", "dev")
+    assert status["database"]["engine"] == "sqlite"
+    assert status["database"]["size_bytes"] > 0
+    assert status["uptime_seconds"] >= 0
+    assert status["counts"]["products"] >= status["counts"]["active_products"] > 0
+    assert status["counts"]["low_stock_products"] >= 1
+    assert status["counts"]["users"] >= 1
+    assert status["backups"]["supported"] is True
+    assert status["backups"]["interval_hours"] == 24
+    assert status["last_activity"]["actor"]

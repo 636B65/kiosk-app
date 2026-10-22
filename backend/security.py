@@ -12,6 +12,7 @@ from models import User
 from timeutil import utcnow
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 
 def verify_password(plain_password, hashed_password):
@@ -66,3 +67,18 @@ def get_current_user(
     if not user.is_active:
         raise credentials_exception
     return user
+
+
+def get_optional_user(
+    token: str | None = Depends(optional_oauth2_scheme), db: Session = Depends(get_db)
+):
+    """The signed-in admin for public endpoints that show admins more, else None.
+
+    An invalid or expired token is treated as anonymous instead of failing.
+    """
+    if not token:
+        return None
+    try:
+        return get_current_user(token, db)
+    except HTTPException:
+        return None

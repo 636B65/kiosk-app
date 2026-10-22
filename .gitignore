@@ -11,3 +11,4 @@ product_images/
 node_modules/
 .e2e-db.sqlite
 .pytest_cache/
+backups/

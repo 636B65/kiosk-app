@@ -52,13 +52,16 @@ backend/
   config.py        Settings (pydantic-settings, env_file=".env"), SECRET_KEY handling
   database.py      SQLite engine + session (read DATABASE_PATH at import time)
   models.py        User, Category, Product, Customer, Order, OrderItem, Setting
-  migrations.py    idempotent SQLite ALTER TABLE-style migrations, run at startup
+  migrations.py    idempotent SQLite ALTER TABLE-style migrations + ADDED_COLUMNS (all dialects), run at startup
   seed.py          admin user (ADMIN_PASSWORD or random) + demo categories/products/settings
+  audit.py         audit.record(db, actor, action, ...) helper (no commit; caller commits)
+  backups.py       SQLite VACUUM INTO backups, pruning, BackupScheduler thread
   security.py      bcrypt + JWT auth, OAuth2 bearer
   timeutil.py      utcnow()        # naive UTC. NEVER use datetime.utcnow()
   due_dates.py     payment_due_date parsing/computation helpers
   schemas.py       Pydantic v2 response/serialization schemas
-  routers/         auth, categories, customers, orders, products, reports, settings, users
+  routers/         auth, audit, categories, customers, orders, products, reports, restocks,
+                   settings, system (status + backups), users
   tests/           test_api.py (full API suite) + test_due_dates.py (units)
 frontend/
   version.json     dev placeholder; the Docker build overwrites it with release + commit
@@ -103,10 +106,48 @@ tests/e2e/
   When set, new orders get `due_date = <that date> 23:59:59` (naive UTC). Empty/invalid = `NULL`.
   This is the store-wide "pay by" moment shown in admin and on customer lookups, and once it
   has passed it gates further checkout while a balance is outstanding (see the block rule above).
-- **Weekly specials / pricing**: a product's displayed price is `special_price` when
-  `is_weekly_special` is true, else `price`. Orders always store the price snapshotted
-  at purchase time in `OrderItem.unit_price` (and `product_name`), so admin order lines
-  still show what was paid even if the product later changes.
+- **Weekly specials / pricing**: a product's displayed price is `special_price` when the
+  special is active, else `price`. A special is active when `is_weekly_special` is true,
+  `special_price` is set, and today (UTC date) is within the optional inclusive
+  `special_starts_on`..`special_ends_on` window (`Product.special_active`, exposed in
+  `ProductOut`; the frontend uses `isSpecialActive()`/`specialState()` and must not
+  re-derive it from `is_weekly_special` alone). An end before the start is a 422.
+  Orders always store the price snapshotted at purchase time in `OrderItem.unit_price`
+  (and `product_name`), so admin order lines still show what was paid even if the
+  product later changes.
+- **Purchase prices / margins**: `Product.cost_price` is staff-only. Public product
+  endpoints (`GET /api/products`, `/{id}`, `/barcode/{code}`) return `cost_price: null`
+  unless a valid admin token is sent (`get_optional_user`), and the Redis cache only
+  stores/serves requests without an `Authorization` header. Orders snapshot the cost
+  into `OrderItem.unit_cost` (never exposed in order/lookup schemas).
+  `GET /api/reports/margins?period=today|week|month|all` reports revenue, cost and
+  margin of paid lines; lines without a cost count as revenue but not toward margin.
+- **Restocks**: `POST /api/products/{id}/restock` (admin; quantity 1..100000, optional
+  `unit_cost` which also becomes the product's `cost_price`, note) adds stock and logs a
+  `Restock` row; history via `GET /api/products/{id}/restocks` and `GET /api/restocks`.
+- **Low stock**: each product has `low_stock_threshold` (default 5); the dashboard
+  "Restock needed" list (`summary.low_stock_products`), CSV `restock_needed` rows, the
+  admin stock colouring and the kiosk "low stock" label all use it.
+- **Audit log** (`GET /api/audit?action=<prefix>&limit=`, admin): written in the same
+  transaction as the change for order status changes (`order.<status>`), reset payment
+  (`customer.reset_payment`), self-mark-paid (`customer.self_mark_paid`, actor `kiosk`),
+  product create/update/delete/restock, changed settings, user create/update/delete
+  (never the password itself) and backup create/download. New admin mutations should
+  call `audit.record(...)` too.
+- **Backups**: SQLite only. `backups.py` writes `kiosk-YYYYmmdd-HHMMSS[-N].db` with
+  `VACUUM INTO` into `<db dir>/backups/`; settings `backup_interval_hours` (default 24,
+  0 = off) and `backup_keep` (default 7). The scheduler thread first checks after 10 min,
+  so tests never trigger it. Endpoints: `GET/POST /api/system/backups`,
+  `GET /api/system/backups/{name}` (name must match the backup pattern).
+  `GET /api/system/status` reports version (`APP_VERSION`/`GIT_COMMIT` env, set from the
+  backend image's build args), uptime, DB size, counts and backups.
+- **Kiosk idle reset**: setting `kiosk_idle_seconds` (default 90, 0 = off). On the
+  customer route, if there is anything to clear (cart, open dialog/cart, search,
+  category), the kiosk shows a 10 s "Still there?" warning, then empties the cart and
+  closes dialogs. Any touch/key cancels it.
+- **Buy again**: `GET /api/customers/{username}` includes `favorites` (top 5 active
+  products by quantity over non-cancelled orders); the lookup shows them as one-tap
+  add-to-cart buttons.
 - **Stock**: decremented at order creation; never negative (400 if insufficient).
 - **Lookup/suggest is public** (no auth): `GET /api/customers/suggest` returns only matching
   usernames (max 20) — never balances. `GET /api/customers/{username}` returns full history
@@ -123,6 +164,8 @@ tests/e2e/
 - `python:3.12`, pydantic v2, SQLAlchemy classic `Column(...)` models (no `Mapped[]`).
 - Run migrations in `migrations.py` (idempotent, `migrate(engine)`, uses `ALTER TABLE`
   style adds with `IF NOT EXISTS`-guarded logic). Inspect `sqlite_master` before altering.
+  New nullable/defaulted columns go in `ADDED_COLUMNS`, which `add_missing_columns()`
+  applies on SQLite **and** PostgreSQL (high-traffic mode skips `migrate()`).
 - Use `timeutil.utcnow()` — never `datetime.utcnow()`. All timestamps are naive UTC.
 - Admin-only endpoints: `dependency=Depends(get_current_user)`. Customer-facing endpoints
   (orders POST, customers GET/suggest/{username}) are public by design — do not protect them.
@@ -150,6 +193,8 @@ tests/e2e/
 - Routing is hash-based (`#/admin/dashboard` etc.) handled in `app.js::parseRoute`.
 - Format money with the currency from `Store.settings.currency` (SUPPORTED_CURRENCIES in app.js).
 - `Modal.open(content)`/`Modal.fill(content)`/`Modal.close()` for dialogs; `Toast.success/error`.
+- Admin views get their container with `const app = this.mainFor("<view>"); if (!app) return;`
+  **after** their awaits, so a slow render never overwrites a view the admin moved on to.
 - The admin customers table columns, in order: User | Created | Orders | Orders/mo |
   Busiest day | Total paid | **Balance** | actions. E2E reads balance via `td:nth(6)`.
 
@@ -209,6 +254,11 @@ a token without those scopes gets HTTP 401/403 from the Packages API.
   - Any browser console/page error fails the e2e run unless it matches `expectedErrors` in
     e2e.js (the overdue-checkout 403 and the `ghost_user_x` lookup 404). A new step that
     intentionally triggers an error response must add a narrow pattern there.
+  - `hasText` is a case-insensitive substring match ("Cola" matches "Chocolate Bar");
+    use the `productRow(name)` helper for admin product rows.
+  - Set `E2E_FAIL_SHOTS=<dir>` to save a screenshot (and log the URL) for each failed step.
+  - The backup step writes `backups/` next to the e2e DB; the harness removes it at the
+    end if the run created it (`backups/` is also gitignored).
 - Local Python is frequently newer than 3.12; the pinned `requirements.txt` wheels may lack
   compatibility → install first `fastapi pydantic sqlalchemy uvicorn python-multipart
   pyjwt bcrypt pytest ruff mypy` as latest (loose) when developing locally, but never change

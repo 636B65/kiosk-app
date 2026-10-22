@@ -12,9 +12,22 @@ from starlette.concurrency import iterate_in_threadpool
 
 import models  # noqa: F401
 from config import settings as app_settings
+from backups import BackupScheduler
 from database import Base, SessionLocal, engine
-from migrations import migrate
-from routers import auth, categories, customers, orders, products, reports, settings, users
+from migrations import add_missing_columns, migrate
+from routers import (
+    audit as audit_routes,
+    auth,
+    categories,
+    customers,
+    orders,
+    products,
+    reports,
+    restocks,
+    settings,
+    system,
+    users,
+)
 from seed import seed
 
 logger = logging.getLogger(__name__)
@@ -27,6 +40,8 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "sqlite":
         migrate(engine)
+    else:
+        add_missing_columns(engine)
     db = SessionLocal()
     try:
         seed(db)
@@ -37,7 +52,10 @@ async def lifespan(app: FastAPI):
         if app_settings.redis_url
         else None
     )
+    scheduler = BackupScheduler(engine, SessionLocal)
+    scheduler.start()
     yield
+    scheduler.stop()
     if app.state.redis:
         await app.state.redis.aclose()
 
@@ -48,7 +66,13 @@ app = FastAPI(title="Kiosk API", lifespan=lifespan)
 @app.middleware("http")
 async def redis_cache(request, call_next):
     redis = getattr(request.app.state, "redis", None)
-    cacheable = request.method == "GET" and request.url.path in CACHEABLE_PATHS
+    # Signed-in admins can get extra fields (e.g. product cost prices), so only
+    # anonymous responses are cached and served from the cache.
+    cacheable = (
+        request.method == "GET"
+        and request.url.path in CACHEABLE_PATHS
+        and "authorization" not in request.headers
+    )
     cache_key = None
     version_key = "kiosk:api-cache:version"
 
@@ -122,6 +146,9 @@ app.include_router(orders.router)
 app.include_router(reports.router)
 app.include_router(settings.router)
 app.include_router(users.router)
+app.include_router(restocks.router)
+app.include_router(audit_routes.router)
+app.include_router(system.router)
 
 _image_dir = os.path.join(
     os.path.dirname(os.path.abspath(app_settings.database_path)) or ".",

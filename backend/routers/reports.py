@@ -2,6 +2,8 @@ import csv
 import io
 from datetime import datetime, timedelta
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
@@ -37,6 +39,119 @@ def outstanding_total(db: Session) -> float:
         .scalar()
     )
     return round(total or 0.0, 2)
+
+
+def low_stock_products(db: Session) -> list[dict]:
+    """Active products at or below their own restock threshold, emptiest first."""
+    products = (
+        db.query(Product)
+        .filter(
+            Product.is_active,
+            Product.stock <= func.coalesce(Product.low_stock_threshold, 0),
+        )
+        .order_by(Product.stock.asc(), Product.name.asc())
+        .all()
+    )
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "stock": p.stock,
+            "low_stock_threshold": p.low_stock_threshold,
+            "price": p.price,
+            "special_price": p.special_price,
+            "is_weekly_special": p.is_weekly_special,
+            "special_active": p.special_active,
+            "cost_price": p.cost_price,
+        }
+        for p in products
+    ]
+
+
+def margins_for_period(
+    db: Session, start: datetime | None = None, end: datetime | None = None
+) -> dict:
+    """Paid sales per product with cost and margin.
+
+    Cost comes from the purchase price snapshotted on each order line, so
+    lines sold before a cost was known count toward revenue but are left out
+    of the margin (reported as ``uncosted_quantity``).
+    """
+    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+    costed = OrderItem.unit_cost.isnot(None)
+    line_revenue = OrderItem.unit_price * OrderItem.quantity
+    query = (
+        db.query(
+            OrderItem.product_name,
+            func.sum(OrderItem.quantity).label("quantity"),
+            func.coalesce(func.sum(line_revenue), 0.0).label("revenue"),
+            func.coalesce(
+                func.sum(case((costed, line_revenue), else_=0.0)), 0.0
+            ).label("costed_revenue"),
+            func.coalesce(
+                func.sum(case((costed, OrderItem.unit_cost * OrderItem.quantity), else_=0.0)),
+                0.0,
+            ).label("cost"),
+            func.coalesce(
+                func.sum(case((costed, 0), else_=OrderItem.quantity)), 0
+            ).label("uncosted_quantity"),
+        )
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(Order.status == "paid")
+    )
+    if start:
+        query = query.filter(paid_at >= start)
+    if end:
+        query = query.filter(paid_at < end)
+    rows = query.group_by(OrderItem.product_name).all()
+
+    def margin_row(name, quantity, revenue, costed_revenue, cost, uncosted):
+        margin = costed_revenue - cost
+        return {
+            "product": name,
+            "quantity": int(quantity or 0),
+            "revenue": round(revenue or 0.0, 2),
+            "cost": round(cost or 0.0, 2),
+            "margin": round(margin, 2),
+            "margin_pct": round(margin / costed_revenue * 100, 1) if costed_revenue else None,
+            "uncosted_quantity": int(uncosted or 0),
+        }
+
+    products = [
+        margin_row(
+            r.product_name, r.quantity, r.revenue, r.costed_revenue, r.cost, r.uncosted_quantity
+        )
+        for r in rows
+    ]
+    products.sort(key=lambda r: (-r["margin"], -r["revenue"], r["product"]))
+    totals = margin_row(
+        None,
+        sum(r.quantity or 0 for r in rows),
+        sum(r.revenue or 0.0 for r in rows),
+        sum(r.costed_revenue or 0.0 for r in rows),
+        sum(r.cost or 0.0 for r in rows),
+        sum(r.uncosted_quantity or 0 for r in rows),
+    )
+    totals.pop("product")
+    return {"products": products, "totals": totals}
+
+
+def period_bounds(period: str, now: datetime) -> tuple[datetime | None, datetime | None]:
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "today":
+        return today, today + timedelta(days=1)
+    if period == "week":
+        week = today - timedelta(days=today.weekday())
+        return week, week + timedelta(days=7)
+    if period == "month":
+        month = today.replace(day=1)
+        next_month = (
+            month.replace(year=month.year + 1, month=1)
+            if month.month == 12
+            else month.replace(month=month.month + 1)
+        )
+        return month, next_month
+    return None, None
 
 
 def top_customers_for_period(
@@ -195,12 +310,19 @@ def summary(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
         "outstanding": outstanding_total(db),
         "pending_orders": db.query(Order).filter(Order.status == "pending").count(),
         "next_due_date": get_due_date(db),
-        "low_stock_products": (
-            db.query(Product)
-            .filter(Product.is_active, Product.stock <= 5)
-            .all()
-        ),
+        "low_stock_products": low_stock_products(db),
+        "margin_month": margins_for_period(db, month, next_month)["totals"],
     }
+
+
+@router.get("/margins")
+def margins(
+    period: Literal["today", "week", "month", "all"] = "all",
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    start, end = period_bounds(period, utcnow())
+    return {"period": period, **margins_for_period(db, start, end)}
 
 
 @router.get("/top-products")
@@ -417,6 +539,12 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
     for product in db.query(Product).order_by(Product.name, Product.id).all():
         unit_price = product.effective_price
         category = product.category.name if product.category else ""
+        cost = (
+            f"; cost price {product.cost_price}; value at cost "
+            f"{round(product.stock * product.cost_price, 2)}"
+            if product.cost_price is not None
+            else "; cost price not set"
+        )
         write_row(
             "inventory",
             record="active" if product.is_active else "inactive",
@@ -425,7 +553,44 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
             unit_price=unit_price,
             stock=product.stock,
             stock_value=round(product.stock * unit_price, 2),
-            details=f"category: {category}; value at current selling price",
+            details=f"category: {category}; value at current selling price{cost}",
+        )
+
+    for product in low_stock_products(db):
+        write_row(
+            "restock_needed",
+            record="low_stock",
+            record_id=product["id"],
+            name=product["name"],
+            stock=product["stock"],
+            details=f"threshold {product['low_stock_threshold']}",
+        )
+
+    for period in ("month", "all"):
+        start, end = period_bounds(period, now)
+        report = margins_for_period(db, start, end)
+        for row in report["products"]:
+            write_row(
+                "margins",
+                period="all_time" if period == "all" else period,
+                record="product",
+                name=row["product"],
+                quantity=row["quantity"],
+                amount=row["margin"],
+                details=(
+                    f"revenue {row['revenue']}; cost {row['cost']}; margin "
+                    f"{row['margin_pct'] if row['margin_pct'] is not None else '-'}%; "
+                    f"units without cost {row['uncosted_quantity']}"
+                ),
+            )
+        totals = report["totals"]
+        write_row(
+            "margins",
+            period="all_time" if period == "all" else period,
+            record="store_total",
+            quantity=totals["quantity"],
+            amount=totals["margin"],
+            details=f"revenue {totals['revenue']}; cost {totals['cost']}",
         )
 
     paid_at = func.coalesce(Order.completed_at, Order.created_at)

@@ -1,4 +1,4 @@
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 from due_dates import DUE_DATE_SETTING, compute_due_time, parse_due_date
@@ -35,6 +35,36 @@ def _drop_column(conn, table: str, column: str):
         )
     )
     conn.execute(text(f"DROP TABLE {table}__old"))
+
+
+# Columns added after tables already existed in deployed databases. Plain
+# ADD COLUMN DDL that SQLite and PostgreSQL both accept; create_all() only
+# creates missing tables, so every dialect runs this at startup.
+ADDED_COLUMNS = {
+    "products": {
+        "special_starts_on": "DATE",
+        "special_ends_on": "DATE",
+        "cost_price": "FLOAT",
+        "low_stock_threshold": "INTEGER DEFAULT 5",
+    },
+    "order_items": {
+        "unit_cost": "FLOAT",
+    },
+}
+
+
+def add_missing_columns(engine: Engine) -> None:
+    """Add newer nullable/defaulted columns to existing tables (any dialect)."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in ADDED_COLUMNS.items():
+            if table not in tables:
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 def migrate(engine: Engine) -> None:
@@ -135,3 +165,5 @@ def migrate(engine: Engine) -> None:
 
             # Old statuses: 'completed' meant the order was paid.
             conn.execute(text("UPDATE orders SET status='paid' WHERE status='completed'"))
+
+    add_missing_columns(engine)

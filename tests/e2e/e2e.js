@@ -16,6 +16,9 @@ const DB = process.env.E2E_DB || path.join(REPO, ".e2e-db.sqlite");
 const PYTHON = process.env.E2E_PYTHON || "python3";
 
 try { fs.unlinkSync(DB); } catch {}
+// "Back up now" writes next to the database; remove what this run created.
+const BACKUP_DIR = path.join(path.dirname(DB), "backups");
+const backupDirExisted = fs.existsSync(BACKUP_DIR);
 
 const backend = spawn(
   PYTHON,
@@ -118,6 +121,10 @@ server.listen(PORT, async () => {
       results.push(`PASS  ${name}${extra ? " — " + extra : ""}`);
     } catch (e) {
       results.push(`FAIL  ${name} — ${e.message.split("\n")[0]}`);
+      if (process.env.E2E_FAIL_SHOTS) {
+        await page.screenshot({ path: path.join(process.env.E2E_FAIL_SHOTS, name.replace(/\W+/g, "_") + ".png") }).catch(() => {});
+        console.log("FAILED AT", page.url());
+      }
     }
   }
 
@@ -137,6 +144,22 @@ server.listen(PORT, async () => {
       body: JSON.stringify({ key: "payment_due_date", value }),
     });
     if (!res.ok) throw new Error("failed to set payment_due_date: " + res.status);
+  }
+
+  async function setSetting(key, value) {
+    const login = await fetch(`http://${BACKEND}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: process.env.E2E_ADMIN_PASSWORD || "test-admin-password" }),
+    });
+    if (!login.ok) throw new Error("admin login failed: " + login.status);
+    const { access_token } = await login.json();
+    const res = await fetch(`http://${BACKEND}/api/settings/${key}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${access_token}` },
+      body: JSON.stringify({ key, value }),
+    });
+    if (!res.ok) throw new Error(`failed to set ${key}: ${res.status}`);
   }
 
   async function setCustomerSelfServicePayment(value) {
@@ -637,11 +660,170 @@ server.listen(PORT, async () => {
       if (!special.includes("5,00")) throw new Error("special price missing: " + special);
       return "special first: " + oldP + " → " + special;
     });
+
+    // ---- 1.0.32: buy again, idle reset, restocks, margins, audit, system ----
+    const freshKiosk = async () => {
+      await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
+      await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.waitForSelector(".product-card");
+    };
+
+    await step("customer: lookup offers buy-again favorites that add to the cart", async () => {
+      await freshKiosk();
+      await page.evaluate(() => Kiosk.openLookup());
+      await page.fill("#lk-username", "alice");
+      await page.locator("#lookup-form button[type=submit]").click();
+      await page.waitForSelector(".buy-again-btn", { timeout: 5000 });
+      const names = await page.locator(".buy-again-name").allTextContents();
+      if (!names.includes("USB-C Cable")) throw new Error("alice's purchase not offered: " + names.join(", "));
+      await page.locator(".buy-again-btn", { hasText: "USB-C Cable" }).click();
+      await page.waitForFunction(() => document.getElementById("buy-again-count")?.textContent === "1");
+      const toast = await page.locator(".toast.success").last().textContent();
+      if (!toast.includes("USB-C Cable added to cart")) throw new Error("no confirmation: " + toast);
+      await page.locator('[data-action="kiosk-open-cart"]').click();
+      await page.waitForSelector("#cart-overlay .cart-item");
+      const item = await page.locator("#cart-overlay .cart-item-name").first().textContent();
+      if (item.trim() !== "USB-C Cable") throw new Error("cart holds " + item);
+      return `favorites: ${names.join(", ")}`;
+    });
+
+    await step("customer: idle kiosk warns, then clears the cart for the next person", async () => {
+      await setSetting("kiosk_idle_seconds", "2");
+      try {
+        await freshKiosk();
+        await page.locator(".product-card", { hasText: "Cola" }).first().locator(".add-btn").click();
+        await page.waitForSelector("#idle-warning", { timeout: 6000 });
+        await page.locator('#idle-warning [data-action="kiosk-idle-continue"]').click();
+        await page.waitForSelector("#idle-warning", { state: "detached" });
+        if ((await page.locator("#cart-count").textContent()).trim() !== "1") throw new Error("'I'm still here' lost the cart");
+        await page.waitForSelector("#idle-warning", { timeout: 6000 });
+        await page.waitForSelector("#idle-warning", { state: "detached", timeout: 15000 });
+        const badge = (await page.locator("#cart-count").textContent()).trim();
+        const stored = await page.evaluate(() => localStorage.getItem("kiosk_cart"));
+        if (badge !== "0" || stored !== "[]") throw new Error(`cart survived reset: badge ${badge}, stored ${stored}`);
+        const toast = await page.locator(".toast").last().textContent();
+        if (!toast.includes("reset after inactivity")) throw new Error("no reset notice: " + toast);
+        return "warned, kept on tap, then reset (cart cleared)";
+      } finally {
+        await setSetting("kiosk_idle_seconds", "90");
+      }
+    });
+
+    const adminView = async (view, selector) => {
+      await page.evaluate((v) => { location.hash = "#admin/" + v; }, view);
+      await page.waitForSelector(selector, { timeout: 7000 });
+    };
+    // Exact name match: hasText alone would let "Cola" match "Chocolate Bar".
+    const productRow = (name) =>
+      page.locator("#products-table tbody tr").filter({ has: page.locator("td:nth-child(2)", { hasText: new RegExp(`^\\s*${name}\\b`) }) });
+    const editProduct = async (name) => {
+      await adminView("products", "#recent-restocks");
+      await productRow(name).locator(".edit-product").click();
+      await page.waitForSelector("#product-form");
+    };
+
+    await step("admin: per-product low-stock threshold puts it on the restock list", async () => {
+      await page.evaluate(() => document.getElementById("cart-overlay")?.remove());
+      await editProduct("Baseball Cap");
+      await page.fill("#p-threshold", "20");
+      await page.locator("#product-form button[type=submit]").click();
+      await page.waitForSelector("#product-form", { state: "detached" });
+      await adminView("dashboard", "#restock-needed");
+      const row = page.locator("#restock-needed tr", { hasText: "Baseball Cap" });
+      if ((await row.count()) !== 1) throw new Error("Baseball Cap not on the restock list");
+      return (await row.textContent()).replace(/\s+/g, " ").trim();
+    });
+
+    await step("admin: restock records a delivery with purchase price", async () => {
+      await page.locator("#restock-needed tr", { hasText: "Baseball Cap" }).locator('[data-action="admin-restock"]').click();
+      await page.waitForSelector("#restock-form");
+      await page.fill("#r-quantity", "10");
+      await page.fill("#r-cost", "7.5");
+      await page.fill("#r-note", "e2e delivery");
+      await page.locator("#restock-form button[type=submit]").click();
+      await page.waitForSelector(".toast.success >> text=Added 10 × Baseball Cap", { timeout: 5000 });
+      await page.waitForFunction(() => !document.querySelector("#restock-needed")?.textContent.includes("Baseball Cap"));
+      await adminView("products", "#recent-restocks");
+      const row = (await productRow("Baseball Cap").textContent()).replace(/\s+/g, " ");
+      if (!row.includes("7,50")) throw new Error("cost not shown: " + row);
+      const delivery = await page.locator("#recent-restocks tr", { hasText: "e2e delivery" }).count();
+      if (delivery !== 1) throw new Error("delivery missing from recent deliveries");
+      return "stock topped up, cost 7,50 € recorded";
+    });
+
+    await step("admin: scheduled special stays off until its start date", async () => {
+      const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      await editProduct("Cola");
+      await page.check("#p-weekly");
+      await page.fill("#p-special-price", "0.99");
+      await page.fill("#p-special-start", tomorrow);
+      await page.locator("#product-form button[type=submit]").click();
+      await page.waitForSelector("#product-form", { state: "detached" });
+      await productRow("Cola").locator(".weekly-badge", { hasText: "Scheduled" }).waitFor({ timeout: 5000 });
+      const cola = await page.evaluate(async () => {
+        const res = await fetch("/api/products");
+        return (await res.json()).find((p) => p.name === "Cola");
+      });
+      if (cola.special_active !== false || cola.cost_price !== null) {
+        throw new Error("public product: " + JSON.stringify({ active: cola.special_active, cost: cola.cost_price }));
+      }
+      return `starts ${tomorrow}; inactive and cost hidden for the kiosk`;
+    });
+
+    await step("admin: margins panel reports paid sales against cost", async () => {
+      await adminView("reports", "#margins-panel table");
+      await page.locator('#margins-panel [data-period="all"]').click();
+      await page.waitForSelector('#margins-panel [data-period="all"].btn-primary');
+      const rows = await page.locator("#margins-panel tbody tr").count();
+      const total = (await page.locator("#margins-panel tfoot").textContent()).replace(/\s+/g, " ").trim();
+      if (rows === 0 || !total.includes("%")) throw new Error(`no margins: ${rows} rows, total ${total}`);
+      return `${rows} product(s); ${total}`;
+    });
+
+    await step("admin: audit log records payments, edits and deliveries", async () => {
+      await adminView("audit", "#audit-rows table");
+      const actions = await page.locator("#audit-rows .audit-action").allTextContents();
+      for (const expected of ["product.restock", "product.update", "customer.reset_payment", "settings.update"]) {
+        if (!actions.includes(expected)) throw new Error(`missing ${expected}: ${[...new Set(actions)].join(", ")}`);
+      }
+      await page.selectOption("#audit-filter", "product.restock");
+      await page.waitForFunction(() => {
+        const cells = [...document.querySelectorAll("#audit-rows .audit-action")];
+        return cells.length > 0 && cells.every((c) => c.textContent === "product.restock");
+      });
+      return `${actions.length} entries; filter works`;
+    });
+
+    await step("admin: system page shows health and takes a backup", async () => {
+      await adminView("system", "#backups-panel");
+      const db = (await page.locator(".stat-card", { hasText: "Database" }).textContent()).replace(/\s+/g, " ");
+      if (!db.includes("sqlite")) throw new Error("database card: " + db);
+      await page.locator('[data-action="admin-backup-now"]').click();
+      await page.waitForSelector('#backups-panel [data-action="admin-backup-download"]', { timeout: 7000 });
+      const name = await page.locator('#backups-panel [data-action="admin-backup-download"]').first().getAttribute("data-name");
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        page.locator('#backups-panel [data-action="admin-backup-download"]').first().click(),
+      ]);
+      if (download.suggestedFilename() !== name) throw new Error("downloaded " + download.suggestedFilename());
+      return `backup ${name} created and downloaded`;
+    });
+
+    await step("admin: settings expose idle reset and backup schedule", async () => {
+      await adminView("settings", "#s-kiosk_idle_seconds");
+      const values = await Promise.all(
+        ["#s-kiosk_idle_seconds", "#s-backup_interval_hours", "#s-backup_keep"].map((s) => page.inputValue(s))
+      );
+      if (values.join(",") !== "90,24,7") throw new Error("unexpected defaults: " + values.join(","));
+      return "idle 90 s, backup every 24 h, keep 7";
+    });
   } catch (e) {
     results.push("FAIL  outer — " + e.message);
   }
 
   await browser.close();
+  if (!backupDirExisted) fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
   server.close();
   backend.kill("SIGTERM");
   console.log("\n" + results.join("\n"));
