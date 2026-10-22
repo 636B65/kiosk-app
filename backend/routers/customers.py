@@ -5,14 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+import audit
 from database import get_db
 from due_dates import get_due_date
-from models import Customer, Order, OrderItem, Setting
+from models import Customer, Order, OrderItem, Product, Setting, User
 from schemas import (
     CustomerHistoryOut,
     CustomerOut,
     CustomerStats,
     CustomerWithBalance,
+    FavoriteOut,
     MonthAgg,
     WeekdayAgg,
 )
@@ -22,6 +24,7 @@ from timeutil import utcnow
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
 WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+FAVORITES_LIMIT = 5
 
 
 def find_customer(db: Session, username: str) -> Customer:
@@ -133,6 +136,32 @@ def stats_for(db: Session, customer_id: int) -> CustomerStats:
     )
 
 
+def favorites_for(db: Session, customer_id: int) -> List[FavoriteOut]:
+    """Most-bought products (non-cancelled orders) that can still be bought."""
+    rows = (
+        db.query(
+            Product.id,
+            Product.name,
+            func.sum(OrderItem.quantity).label("qty"),
+        )
+        .join(OrderItem, OrderItem.product_id == Product.id)
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(
+            Order.customer_id == customer_id,
+            Order.status != "cancelled",
+            Product.is_active,
+        )
+        .group_by(Product.id, Product.name)
+        .order_by(func.sum(OrderItem.quantity).desc(), Product.name.asc())
+        .limit(FAVORITES_LIMIT)
+        .all()
+    )
+    return [
+        FavoriteOut(product_id=row.id, name=row.name, quantity=int(row.qty or 0))
+        for row in rows
+    ]
+
+
 @router.get("", response_model=List[CustomerWithBalance])
 def list_customers(
     db: Session = Depends(get_db),
@@ -199,10 +228,11 @@ def customer_lookup(username: str, db: Session = Depends(get_db)):
         total_paid=totals_for(db, customer.id, "paid"),
         orders=orders,
         stats=stats_for(db, customer.id),
+        favorites=favorites_for(db, customer.id),
     )
 
 
-def settle_pending(db: Session, customer: Customer) -> dict:
+def settle_pending(db: Session, customer: Customer, actor: str, action: str) -> dict:
     orders = (
         db.query(Order)
         .filter(Order.customer_id == customer.id, Order.status == "pending")
@@ -211,11 +241,19 @@ def settle_pending(db: Session, customer: Customer) -> dict:
     for order in orders:
         order.status = "paid"
         order.completed_at = utcnow()
+    amount = round(sum(o.total for o in orders), 2)
+    if orders:
+        audit.record(
+            db, actor, action, "customer", customer.username,
+            f"{len(orders)} order(s) marked paid: "
+            + ", ".join(f"#{o.id}" for o in orders)
+            + f"; amount {amount}",
+        )
     db.commit()
     return {
         "username": customer.username,
         "settled": len(orders),
-        "amount": round(sum(o.total for o in orders), 2),
+        "amount": amount,
     }
 
 
@@ -226,13 +264,17 @@ def self_mark_paid(username: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=403, detail="Customer self-service payment is disabled"
         )
-    return settle_pending(db, find_customer(db, username))
+    return settle_pending(
+        db, find_customer(db, username), audit.KIOSK_ACTOR, "customer.self_mark_paid"
+    )
 
 
 @router.post("/{username}/reset-payment")
 def reset_payment(
     username: str,
     db: Session = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    return settle_pending(db, find_customer(db, username))
+    return settle_pending(
+        db, find_customer(db, username), user.username, "customer.reset_payment"
+    )

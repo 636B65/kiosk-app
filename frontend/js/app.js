@@ -117,6 +117,8 @@ const Modal = {
 // Release + commit footer. version.json is written at image build time
 // (frontend/Dockerfile) and CHANGELOG.md is copied in from the repo root.
 const AppInfo = {
+    info: null,
+
     async init() {
         const el = document.getElementById("app-version");
         if (!el) return;
@@ -124,6 +126,7 @@ const AppInfo = {
             const res = await fetch("version.json", { cache: "no-store" });
             if (!res.ok) return;
             const info = await res.json();
+            this.info = info;
             const version = info.version || "dev";
             const commit = String(info.commit || "");
             el.textContent = `Kiosk ${/^\d/.test(version) ? "v" + version : version}` +
@@ -228,8 +231,43 @@ const fmt = (n) => {
     }).format(n ?? 0);
 };
 
-const effectivePrice = (p) =>
-    p && p.is_weekly_special && p.special_price != null ? p.special_price : (p?.price || 0);
+// The backend decides whether a scheduled special runs today (special_active);
+// older payloads without the field fall back to the plain flag.
+const isSpecialActive = (p) =>
+    !!p && p.is_weekly_special && p.special_price != null && p.special_active !== false;
+
+const effectivePrice = (p) => (isSpecialActive(p) ? p.special_price : (p?.price || 0));
+
+// "active" | "scheduled" | "ended" | null for a product's special.
+function specialState(p) {
+    if (!p || !p.is_weekly_special || p.special_price == null) return null;
+    if (isSpecialActive(p)) return "active";
+    const today = new Date().toISOString().slice(0, 10);
+    return p.special_starts_on && today < p.special_starts_on ? "scheduled" : "ended";
+}
+
+const isLowStock = (p) => p.stock <= (p.low_stock_threshold ?? 5);
+
+function fmtBytes(bytes) {
+    if (bytes == null) return "—";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+    }
+    return `${value.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+
+function fmtDuration(seconds) {
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h ${m}m`;
+    return `${m}m`;
+}
 
 const esc = (s) =>
     String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -304,8 +342,8 @@ function confetti({ particleCount = 180, duration = 3500 } = {}) {
 
 function sortShopProducts(products) {
     return [...products].sort((a, b) => {
-        const aSpec = a.is_weekly_special ? 0 : 1;
-        const bSpec = b.is_weekly_special ? 0 : 1;
+        const aSpec = isSpecialActive(a) ? 0 : 1;
+        const bSpec = isSpecialActive(b) ? 0 : 1;
         if (aSpec !== bSpec) return aSpec - bSpec;
         return a.name.localeCompare(b.name);
     });

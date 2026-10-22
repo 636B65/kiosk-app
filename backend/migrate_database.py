@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine, make_url
 
 import models  # noqa: F401
 from database import Base
-from migrations import migrate
+from migrations import add_missing_columns, migrate
 
 logger = logging.getLogger("migrate_database")
 
@@ -37,6 +37,8 @@ def copy_database(source: Engine, target: Engine, replace_target: bool = False) 
         migrate(source)
     if target.dialect.name == "sqlite":
         migrate(target)
+    else:
+        add_missing_columns(target)
 
     if _has_data(target) and not replace_target:
         raise ValueError(

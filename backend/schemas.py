@@ -1,12 +1,14 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MIN_PASSWORD_LENGTH = 8
 MAX_ORDER_QUANTITY = 1000
 MAX_ORDER_ITEMS = 50
 MAX_NOTES_LENGTH = 500
+MAX_RESTOCK_QUANTITY = 100000
+MAX_RESTOCK_NOTE_LENGTH = 200
 
 
 def normalize_barcodes(values) -> Optional[List[str]]:
@@ -52,13 +54,22 @@ class CategoryOut(CategoryBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _check_special_window(starts: Optional[date], ends: Optional[date]) -> None:
+    if starts and ends and ends < starts:
+        raise ValueError("special_ends_on must not be before special_starts_on")
+
+
 class ProductBase(BaseModel):
     name: str
     description: str = ""
     price: float = 0.0
     special_price: Optional[float] = None
     is_weekly_special: bool = False
+    special_starts_on: Optional[date] = None
+    special_ends_on: Optional[date] = None
+    cost_price: Optional[float] = Field(default=None, ge=0)
     stock: int = 0
+    low_stock_threshold: int = Field(default=5, ge=0)
     is_active: bool = True
     category_id: Optional[int] = None
     barcodes: List[str] = Field(default_factory=list)
@@ -70,7 +81,10 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
-    pass
+    @model_validator(mode="after")
+    def _validate_special_window(self):
+        _check_special_window(self.special_starts_on, self.special_ends_on)
+        return self
 
 
 class ProductUpdate(BaseModel):
@@ -79,7 +93,11 @@ class ProductUpdate(BaseModel):
     price: Optional[float] = None
     special_price: Optional[float] = None
     is_weekly_special: Optional[bool] = None
+    special_starts_on: Optional[date] = None
+    special_ends_on: Optional[date] = None
+    cost_price: Optional[float] = Field(default=None, ge=0)
     stock: Optional[int] = None
+    low_stock_threshold: Optional[int] = Field(default=None, ge=0)
     is_active: Optional[bool] = None
     category_id: Optional[int] = None
     barcodes: Optional[List[str]] = None
@@ -89,11 +107,55 @@ class ProductUpdate(BaseModel):
     def _normalize_barcodes(cls, values):
         return normalize_barcodes(values)
 
+    @model_validator(mode="after")
+    def _validate_special_window(self):
+        _check_special_window(self.special_starts_on, self.special_ends_on)
+        return self
+
 
 class ProductOut(ProductBase):
     id: int
     image_url: Optional[str] = None
     category: Optional[CategoryOut] = None
+    special_active: bool = False
+
+    @field_validator("low_stock_threshold", mode="before")
+    @classmethod
+    def _default_threshold(cls, v):
+        # Rows written outside the ORM may lack a threshold; never fail the public list.
+        return 5 if v is None else v
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RestockIn(BaseModel):
+    quantity: int = Field(ge=1, le=MAX_RESTOCK_QUANTITY)
+    unit_cost: Optional[float] = Field(default=None, ge=0)
+    note: str = Field(default="", max_length=MAX_RESTOCK_NOTE_LENGTH)
+
+
+class RestockOut(BaseModel):
+    id: int
+    product_id: Optional[int] = None
+    product_name: str
+    quantity: int
+    unit_cost: Optional[float] = None
+    stock_after: int
+    note: str = ""
+    created_by: str = ""
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditOut(BaseModel):
+    id: int
+    created_at: Optional[datetime] = None
+    actor: str
+    action: str
+    entity: str = ""
+    entity_id: str = ""
+    details: str = ""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -212,12 +274,19 @@ class CustomerWithBalance(CustomerOut):
     stats: CustomerStats
 
 
+class FavoriteOut(BaseModel):
+    product_id: int
+    name: str
+    quantity: int
+
+
 class CustomerHistoryOut(BaseModel):
     customer: CustomerOut
     balance: float = 0.0
     total_paid: float = 0.0
     orders: List[OrderDetailOut] = []
     stats: CustomerStats
+    favorites: List[FavoriteOut] = []
 
 
 class SettingIn(BaseModel):

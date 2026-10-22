@@ -29,6 +29,82 @@ const Kiosk = {
                 this.scanBarcode(document.getElementById("barcode-input").value);
             }
         });
+        for (const type of ["pointerdown", "keydown", "input", "wheel", "touchstart"]) {
+            document.addEventListener(type, () => this.noteActivity(), { capture: true, passive: true });
+        }
+    },
+
+    // ---- Idle reset: a walk-away customer's cart must not reach the next person.
+
+    IDLE_WARNING_SECONDS: 10,
+    idleTimer: null,
+    idleCountdown: null,
+
+    idleSeconds() {
+        const value = parseInt(Store.settings.kiosk_idle_seconds ?? "90", 10);
+        return Number.isFinite(value) && value > 0 ? value : 0;
+    },
+
+    noteActivity() {
+        if (document.getElementById("idle-warning")) this.cancelIdleWarning();
+        this.armIdleTimer();
+    },
+
+    armIdleTimer() {
+        clearTimeout(this.idleTimer);
+        const seconds = this.idleSeconds();
+        if (seconds) this.idleTimer = setTimeout(() => this.onIdle(), seconds * 1000);
+    },
+
+    hasSession() {
+        return Store.cart.length > 0
+            || Store.activeCategory != null
+            || !!document.getElementById("modal-overlay")
+            || !!document.getElementById("cart-overlay")
+            || !!document.getElementById("search-input")?.value;
+    },
+
+    onIdle() {
+        if (currentRoute !== "customer" || !this.hasSession()) {
+            this.armIdleTimer();
+            return;
+        }
+        let remaining = this.IDLE_WARNING_SECONDS;
+        const warning = document.createElement("div");
+        warning.id = "idle-warning";
+        warning.className = "idle-warning";
+        warning.innerHTML = `
+            <div class="idle-warning-card">
+                <h2>Still there?</h2>
+                <p>The kiosk resets in <strong id="idle-countdown">${remaining}</strong> s
+                   and your cart will be cleared.</p>
+                <button class="btn btn-primary" data-action="kiosk-idle-continue">I'm still here</button>
+            </div>
+        `;
+        document.body.appendChild(warning);
+        this.idleCountdown = setInterval(() => {
+            remaining -= 1;
+            const el = document.getElementById("idle-countdown");
+            if (el) el.textContent = remaining;
+            if (remaining <= 0) this.resetSession();
+        }, 1000);
+    },
+
+    cancelIdleWarning() {
+        clearInterval(this.idleCountdown);
+        document.getElementById("idle-warning")?.remove();
+    },
+
+    resetSession() {
+        this.cancelIdleWarning();
+        Store.cart = [];
+        Store.saveCart();
+        Store.activeCategory = null;
+        Modal.close();
+        document.getElementById("cart-overlay")?.remove();
+        if (currentRoute === "customer") this.renderBody();
+        Toast.show("The kiosk was reset after inactivity");
+        this.armIdleTimer();
     },
 
     renderHeader() {
@@ -88,8 +164,8 @@ const Kiosk = {
         const inCart = Store.cart.find((i) => i.product_id === p.id);
         const qty = inCart ? inCart.quantity : 0;
         const soldOut = p.stock <= 0;
-        const lowStock = p.stock > 0 && p.stock <= 5;
-        const isSpecial = p.is_weekly_special && p.special_price != null;
+        const lowStock = p.stock > 0 && isLowStock(p);
+        const isSpecial = isSpecialActive(p);
         return `
             <div class="product-card">
                 ${isSpecial ? '<div class="weekly-badge">⚡ Weekly special</div>' : ""}
@@ -454,6 +530,7 @@ const Kiosk = {
                 <span style="color:var(--muted);">Total paid</span>
                 <span style="font-weight:700;">${fmt(data.total_paid)}</span>
             </div>
+            ${this.renderBuyAgain(data.favorites)}
             ${renderCustomerStats(data.stats)}
             <h3 style="margin:1.25rem 0 0.5rem;">Order history</h3>
             ${data.orders.length === 0
@@ -478,6 +555,45 @@ const Kiosk = {
                 <button class="btn btn-primary" data-action="kiosk-open-lookup">Another user</button>
             </div>
         `);
+    },
+
+    renderBuyAgain(favorites) {
+        const items = (favorites || [])
+            .map((f) => ({ fav: f, product: Store.products.find((p) => p.id === f.product_id) }))
+            .filter((x) => x.product);
+        if (items.length === 0) return "";
+        return `
+            <div class="buy-again">
+                <div class="buy-again-head">
+                    <h3>⭐ Buy again</h3>
+                    <button class="btn btn-secondary" data-action="kiosk-open-cart">🛒 Cart (<span id="buy-again-count">${Store.cartCount()}</span>)</button>
+                </div>
+                <div class="buy-again-list">
+                    ${items.map(({ fav, product }) => `
+                        <button class="buy-again-btn" data-action="kiosk-buy-again" data-id="${product.id}"
+                                ${product.stock <= 0 ? "disabled" : ""}>
+                            <span class="buy-again-name">${esc(product.name)}</span>
+                            <span class="buy-again-meta">${product.stock <= 0 ? "Sold out" : fmt(effectivePrice(product))} · bought ${fav.quantity}×</span>
+                        </button>
+                    `).join("")}
+                </div>
+            </div>
+        `;
+    },
+
+    buyAgain(productId) {
+        const product = Store.products.find((p) => p.id === productId);
+        if (!product) return;
+        const before = Store.cartCount();
+        this.addToCart(productId);
+        if (Store.cartCount() > before) Toast.success(`${product.name} added to cart`);
+        const count = document.getElementById("buy-again-count");
+        if (count) count.textContent = Store.cartCount();
+    },
+
+    openCartFromModal() {
+        Modal.close();
+        this.renderCart();
     },
 
     async markAllPaid(username) {
@@ -535,5 +651,6 @@ const Kiosk = {
             Toast.error("Failed to load data: " + err.message);
         }
         this.renderBody();
+        this.armIdleTimer();
     },
 };

@@ -2,6 +2,55 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.32] - 2026-10-22
+
+### Added
+- **Idle reset**: after `kiosk_idle_seconds` without a touch (default 90, `0` = off) the
+  kiosk shows a 10-second "Still there?" warning, then clears the cart and closes open
+  dialogs, so the next customer never sees the previous cart, balance or history.
+- **Audit log** (admin "Audit log" page, `GET /api/audit`): who marked orders paid or
+  cancelled, reset or self-marked payments (actor `kiosk`), created/changed/deleted
+  products (field-by-field old -> new), restocked, changed settings or users (never
+  passwords), and took or downloaded backups. Written in the same transaction as the change.
+- **Low-stock alerts per product**: `low_stock_threshold` (default 5) on every product. The
+  dashboard "Restock needed" list, stock colouring, kiosk low-stock label and a new
+  `restock_needed` CSV section use it.
+- **Restock log with purchase price**: "Restock" on the dashboard and products page records
+  quantity, purchase price per unit and a note (`POST /api/products/{id}/restock`), keeps a
+  delivery history and updates the product's purchase price. Orders snapshot the purchase
+  price per line, and Reports gets a margins panel (today/week/month/all time) plus
+  `margins` and cost-value data in the CSV export. The dashboard shows this month's margin.
+- **Time-limited specials**: optional start/end dates on a weekly special; it switches
+  itself on and off (`special_active` in the product API). The admin list marks specials
+  as active, scheduled or ended.
+- **Automatic database backups** (SQLite): a consistent `VACUUM INTO` copy in
+  `data/backups/` every `backup_interval_hours` (default 24, `0` = off), keeping the newest
+  `backup_keep` (default 7), plus "Back up now" and downloads on the System page.
+- **System page**: backend and frontend version/commit (warns when they differ), uptime,
+  database size, product/customer/order counts, last change and backups. The backend image
+  now gets the same `APP_VERSION`/`GIT_COMMIT` build args as the frontend.
+- **Buy again**: the kiosk user lookup lists the customer's most-bought products (top 5,
+  active, non-cancelled orders) as one-tap buttons that add to the cart.
+- New columns are added to existing databases on startup for SQLite and PostgreSQL.
+
+### Security
+- Purchase prices are staff-only: public product endpoints return `cost_price: null`
+  unless an admin token is sent, and the Redis cache never stores or serves
+  authenticated responses.
+
+### Fixed
+- Admin pages no longer overwrite the page you switched to when a previous page finishes
+  loading late (e.g. saving a product and immediately opening the dashboard).
+- Browser demo: removing a product image no longer deletes the whole product.
+
+### Tests
+- Backend: 61 tests (cost-price privacy, thresholds, restocks, margins, scheduled specials,
+  audit entries, favorites, backups and pruning, scheduler, system status, column
+  migration). E2E: 41 steps (buy again, idle warning and reset, threshold, restock,
+  scheduled special, margins, audit filter, backup create and download, new settings), no
+  unexpected console errors. Ruff, mypy and JavaScript syntax pass; agent skill copies
+  verified identical. The Docker + TLS smoke job runs in CI.
+
 ## [1.0.31] - 2026-10-21
 
 ### Added

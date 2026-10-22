@@ -20,8 +20,10 @@ and business rules.
   load order. Route UI actions through `Actions` and `data-action`; do not add inline
   `onclick` handlers.
 - Keep `frontend/js/demo.js` consistent with every changed public API behavior and schema.
-- Preserve documented rules for tab checkout, payment, stock, order price snapshots,
-  due dates, barcode uniqueness, and customer privacy. If behavior changes intentionally,
+- Preserve documented rules for tab checkout, payment, stock, order price and cost
+  snapshots, scheduled specials, due dates, barcode uniqueness, and customer privacy
+  (purchase prices are staff-only). Record admin mutations in the audit log
+  (`audit.record`). If behavior changes intentionally,
   update backend tests, e2e coverage, and `AGENTS.md`.
 - Make the smallest complete change, use existing helpers and naming, and avoid unrelated
   formatting or dependency changes.

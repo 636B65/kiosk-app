@@ -55,9 +55,14 @@
             payment_due_date: "",
             debug_mode: "false",
             customer_self_service_payment: "false",
+            kiosk_idle_seconds: "90",
+            backup_interval_hours: "24",
+            backup_keep: "7",
         },
+        restocks: [],
+        audit: [],
         tokens: {},
-        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100 },
+        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100, restock: 1, audit: 1 },
     };
 
     const CAT_ID = (name) => DB.categories.find((c) => c.name === name).id;
@@ -75,12 +80,25 @@
         { id: 11, name: "Baseball Cap", description: "Adjustable cotton cap", price: 12.99, special_price: null, is_weekly_special: false, stock: 4, is_active: true, category_id: CAT_ID("Clothing"), image_path: svgImage("🧢", "#cbd5e1"), created_at: fmtDT(daysAgo(45)) },
     ];
 
+    // Purchase prices (~60% of the price), restock thresholds and an optional
+    // schedule for the special, mirroring backend/seed.py.
+    for (const p of DB.products) {
+        p.cost_price = Math.round(p.price * 0.6 * 100) / 100;
+        p.low_stock_threshold = 5;
+        p.special_starts_on = null;
+        p.special_ends_on = null;
+    }
+
     function addOrder(order) {
         order.id = DB.nextId.order++;
         order.created_at = order.created_at || fmtDT(new Date());
         order.items.forEach((it) => {
             it.id = DB.nextId.item++;
             it.order_id = order.id;
+            if (it.unit_cost === undefined) {
+                const product = DB.products.find((p) => p.id === it.product_id);
+                it.unit_cost = product ? product.cost_price : null;
+            }
         });
         DB.orders.push(order);
         return order;
@@ -131,8 +149,57 @@
         items: [{ product_id: 11, product_name: "Baseball Cap", quantity: 1, unit_price: 12.99 }],
     });
 
+    function today() { return fmtDT(new Date()).slice(0, 10); }
+
+    function specialActive(p) {
+        if (!p.is_weekly_special || p.special_price == null) return false;
+        if (p.special_starts_on && today() < p.special_starts_on) return false;
+        if (p.special_ends_on && today() > p.special_ends_on) return false;
+        return true;
+    }
+
     function effectivePrice(p) {
-        return p.is_weekly_special && p.special_price != null ? p.special_price : p.price;
+        return specialActive(p) ? p.special_price : p.price;
+    }
+
+    function round2(n) { return Math.round(n * 100) / 100; }
+
+    function audit(actor, action, entity, entityId, details) {
+        DB.audit.push({
+            id: DB.nextId.audit++, created_at: fmtDT(new Date()), actor, action,
+            entity: entity || "", entity_id: String(entityId ?? ""), details: details || "",
+        });
+    }
+
+    function actorOf(init) {
+        return currentUser(init)?.username || "system";
+    }
+
+    function addRestock(product, quantity, unitCost, note, by, createdAt) {
+        product.stock += quantity;
+        if (unitCost != null) product.cost_price = unitCost;
+        const restock = {
+            id: DB.nextId.restock++, product_id: product.id, product_name: product.name,
+            quantity, unit_cost: unitCost ?? null, stock_after: product.stock,
+            note: (note || "").trim(), created_by: by, created_at: createdAt || fmtDT(new Date()),
+        };
+        DB.restocks.push(restock);
+        return restock;
+    }
+
+    // Two past deliveries for the history views (stock levels stay as seeded).
+    for (const [id, quantity, cost, note, days] of [[8, 48, 1.19, "Weekly delivery", 5], [4, 24, 1.79, "", 2]]) {
+        const product = DB.products.find((p) => p.id === id);
+        DB.restocks.push({
+            id: DB.nextId.restock++, product_id: id, product_name: product.name, quantity,
+            unit_cost: cost, stock_after: product.stock, note, created_by: "admin",
+            created_at: fmtDT(daysAgo(days, 9)),
+        });
+        DB.audit.push({
+            id: DB.nextId.audit++, created_at: fmtDT(daysAgo(days, 9)), actor: "admin",
+            action: "product.restock", entity: "product", entity_id: String(id),
+            details: `${product.name}: +${quantity} at ${cost} each; stock now ${product.stock}`,
+        });
     }
 
     function dueTime() {
@@ -145,15 +212,110 @@
         return DB.categories.find((c) => c.id === product.category_id) || null;
     }
 
-    function productOut(p) {
+    function productOut(p, admin) {
         return {
             id: p.id, name: p.name, description: p.description, price: p.price,
             special_price: p.special_price, is_weekly_special: p.is_weekly_special,
-            stock: p.stock, is_active: p.is_active, category_id: p.category_id,
+            special_starts_on: p.special_starts_on || null,
+            special_ends_on: p.special_ends_on || null,
+            special_active: specialActive(p),
+            // Purchase prices are staff-only, as in the real API.
+            cost_price: admin ? (p.cost_price ?? null) : null,
+            stock: p.stock, low_stock_threshold: p.low_stock_threshold ?? 5,
+            is_active: p.is_active, category_id: p.category_id,
             barcodes: p.barcodes || [],
             category: categoryOf(p),
             image_url: p.image_path || null,
         };
+    }
+
+    function lowStockProducts() {
+        return DB.products
+            .filter((p) => p.is_active && p.stock <= (p.low_stock_threshold ?? 5))
+            .sort((a, b) => a.stock - b.stock || a.name.localeCompare(b.name))
+            .map((p) => ({
+                id: p.id, name: p.name, stock: p.stock, low_stock_threshold: p.low_stock_threshold ?? 5,
+                price: p.price, special_price: p.special_price, is_weekly_special: p.is_weekly_special,
+                special_active: specialActive(p), cost_price: p.cost_price ?? null,
+            }));
+    }
+
+    function marginsFor(start, end) {
+        const byName = {};
+        for (const o of DB.orders) {
+            if (o.status !== "paid") continue;
+            const paidAt = new Date(o.completed_at || o.created_at);
+            if (start && paidAt < start) continue;
+            if (end && paidAt >= end) continue;
+            for (const it of o.items) {
+                const row = byName[it.product_name] ||
+                    { quantity: 0, revenue: 0, costedRevenue: 0, cost: 0, uncosted: 0 };
+                const revenue = it.unit_price * it.quantity;
+                row.quantity += it.quantity;
+                row.revenue += revenue;
+                if (it.unit_cost != null) {
+                    row.costedRevenue += revenue;
+                    row.cost += it.unit_cost * it.quantity;
+                } else {
+                    row.uncosted += it.quantity;
+                }
+                byName[it.product_name] = row;
+            }
+        }
+        const out = (name, r) => {
+            const margin = r.costedRevenue - r.cost;
+            const row = {
+                quantity: r.quantity, revenue: round2(r.revenue), cost: round2(r.cost),
+                margin: round2(margin),
+                margin_pct: r.costedRevenue ? Math.round((margin / r.costedRevenue) * 1000) / 10 : null,
+                uncosted_quantity: r.uncosted,
+            };
+            return name == null ? row : { product: name, ...row };
+        };
+        const rows = Object.keys(byName).map((name) => out(name, byName[name]))
+            .sort((a, b) => b.margin - a.margin || b.revenue - a.revenue || a.product.localeCompare(b.product));
+        const sum = (key) => Object.values(byName).reduce((s, r) => s + r[key], 0);
+        return {
+            products: rows,
+            totals: out(null, {
+                quantity: sum("quantity"), revenue: sum("revenue"), costedRevenue: sum("costedRevenue"),
+                cost: sum("cost"), uncosted: sum("uncosted"),
+            }),
+        };
+    }
+
+    function periodBounds(period) {
+        const now = new Date();
+        const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        if (period === "today") return [t0, new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + 1)];
+        if (period === "week") {
+            const week = new Date(t0);
+            week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
+            return [week, new Date(week.getFullYear(), week.getMonth(), week.getDate() + 7)];
+        }
+        if (period === "month") {
+            return [new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 1)];
+        }
+        return [null, null];
+    }
+
+    function favoritesFor(customerId) {
+        const byProduct = {};
+        for (const o of DB.orders) {
+            if (o.customer_id !== customerId || o.status === "cancelled") continue;
+            for (const it of o.items) {
+                const product = DB.products.find((p) => p.id === it.product_id);
+                if (!product || !product.is_active) continue;
+                byProduct[product.id] = (byProduct[product.id] || 0) + it.quantity;
+            }
+        }
+        return Object.keys(byProduct)
+            .map((id) => {
+                const product = DB.products.find((p) => p.id === Number(id));
+                return { product_id: product.id, name: product.name, quantity: byProduct[id] };
+            })
+            .sort((a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name))
+            .slice(0, 5);
     }
 
     function orderItems(o) {
@@ -323,10 +485,7 @@
         nextWeek.setDate(nextWeek.getDate() + 7);
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        const lowStock = DB.products
-            .filter((p) => p.is_active && p.stock <= 5)
-            .sort((a, b) => a.stock - b.stock)
-            .map((p) => productOut(p));
+        const lowStock = lowStockProducts();
         return {
             today: revenueForPeriod(todayStart, tomorrowStart),
             yesterday: revenueForPeriod(yStart, todayStart),
@@ -337,6 +496,7 @@
             pending_orders: DB.orders.filter((o) => o.status === "pending").length,
             next_due_date: dueTime(),
             low_stock_products: lowStock,
+            margin_month: marginsFor(monthStart, nextMonth).totals,
         };
     }
 
@@ -492,12 +652,39 @@
         }
         for (const product of DB.products.slice().sort((a, b) => a.name.localeCompare(b.name))) {
             const price = effectivePrice(product);
+            const cost = product.cost_price != null
+                ? `; cost price ${product.cost_price}; value at cost ${round2(product.stock * product.cost_price)}`
+                : "; cost price not set";
             add("inventory", {
                 record: product.is_active ? "active" : "inactive",
                 id: product.id, name: product.name, unit_price: price, stock: product.stock,
                 stock_value: Math.round(product.stock * price * 100) / 100,
                 details: "category: " + (categoryOf(product)?.name || "") +
-                    "; value at current selling price",
+                    "; value at current selling price" + cost,
+            });
+        }
+        for (const product of lowStockProducts()) {
+            add("restock_needed", {
+                record: "low_stock", id: product.id, name: product.name, stock: product.stock,
+                details: `threshold ${product.low_stock_threshold}`,
+            });
+        }
+        for (const period of ["month", "all"]) {
+            const [start, end] = periodBounds(period);
+            const report = marginsFor(start, end);
+            const label = period === "all" ? "all_time" : period;
+            for (const row of report.products) {
+                add("margins", {
+                    period: label, record: "product", name: row.product, quantity: row.quantity,
+                    amount: row.margin,
+                    details: `revenue ${row.revenue}; cost ${row.cost}; margin ${row.margin_pct ?? "-"}%; ` +
+                        `units without cost ${row.uncosted_quantity}`,
+                });
+            }
+            add("margins", {
+                period: label, record: "store_total", quantity: report.totals.quantity,
+                amount: report.totals.margin,
+                details: `revenue ${report.totals.revenue}; cost ${report.totals.cost}`,
             });
         }
 
@@ -573,6 +760,7 @@
         FORBIDDEN: 403,
         CONFLICT: 409,
         NOT_FOUND: 404,
+        UNPROCESSABLE: 422,
     };
 
     function response(status, data) {
@@ -653,7 +841,7 @@
                 .filter((p) => (catId ? p.category_id === catId : true))
                 .filter((p) => (search ? p.name.toLowerCase().includes(search.toLowerCase()) : true))
                 .sort((a, b) => a.name.localeCompare(b.name))
-                .map((p) => productOut(p));
+                .map((p) => productOut(p, !!currentUser(init)));
         }
         if (path === "/products" && method === "POST") {
             requireAdmin(init);
@@ -662,47 +850,87 @@
                 id, name: body.name, description: body.description || "",
                 price: body.price || 0, special_price: body.special_price ?? null,
                 is_weekly_special: !!body.is_weekly_special,
-                stock: body.stock || 0, is_active: body.is_active !== false,
+                special_starts_on: body.special_starts_on || null,
+                special_ends_on: body.special_ends_on || null,
+                cost_price: body.cost_price ?? null,
+                stock: body.stock || 0, low_stock_threshold: body.low_stock_threshold ?? 5,
+                is_active: body.is_active !== false,
                 category_id: body.category_id ?? null, image_path: null,
                 barcodes: normalizeBarcodes(body.barcodes),
                 created_at: fmtDT(new Date()),
             };
+            assertSpecialWindow(p);
             assertUniqueBarcodes(p.barcodes, null);
             DB.products.push(p);
-            return response(HTTP.CREATED, productOut(p));
+            audit(actorOf(init), "product.create", "product", p.id, `${p.name}; price ${p.price}; stock ${p.stock}`);
+            return response(HTTP.CREATED, productOut(p, true));
         }
-        if (parts.length >= 2 && parts[0] === "products" && method === "PUT") {
+        if (parts.length === 2 && parts[0] === "products" && method === "PUT") {
             requireAdmin(init);
             const p = DB.products.find((x) => x.id === Number(parts[1]));
             if (!p) throw new ApiError(HTTP.NOT_FOUND, "Product not found");
+            const before = { ...p };
+            const fields = [
+                "name", "description", "price", "special_price", "is_weekly_special",
+                "special_starts_on", "special_ends_on", "cost_price", "stock",
+                "low_stock_threshold", "is_active", "category_id",
+            ];
+            const next = { ...p };
+            for (const field of fields) if (body[field] !== undefined) next[field] = body[field];
+            assertSpecialWindow(next);
             if (body.barcodes !== undefined) {
                 const barcodes = normalizeBarcodes(body.barcodes);
                 assertUniqueBarcodes(barcodes, p.id);
-                p.barcodes = barcodes;
+                next.barcodes = barcodes;
             }
-            if (body.name !== undefined) p.name = body.name;
-            if (body.description !== undefined) p.description = body.description;
-            if (body.price !== undefined) p.price = body.price;
-            if (body.special_price !== undefined) p.special_price = body.special_price;
-            if (body.is_weekly_special !== undefined) p.is_weekly_special = body.is_weekly_special;
-            if (body.stock !== undefined) p.stock = body.stock;
-            if (body.is_active !== undefined) p.is_active = body.is_active;
-            if (body.category_id !== undefined) p.category_id = body.category_id;
-            return productOut(p);
+            Object.assign(p, next);
+            const changes = fields.filter((f) => f !== "description" && (before[f] ?? null) !== (p[f] ?? null))
+                .map((f) => `${f}: ${before[f] ?? "-"} -> ${p[f] ?? "-"}`);
+            if (changes.length) audit(actorOf(init), "product.update", "product", p.id, `${p.name}: ${changes.join("; ")}`);
+            return productOut(p, true);
         }
         if (parts.length === 3 && parts[0] === "products" && parts[1] === "barcode" && method === "GET") {
             const barcode = decodeURIComponent(parts[2]).trim().toLowerCase();
             const product = DB.products.find((p) =>
                 p.is_active && (p.barcodes || []).includes(barcode));
             if (!product) throw new ApiError(HTTP.NOT_FOUND, "No active product found for barcode");
-            return productOut(product);
+            return productOut(product, !!currentUser(init));
         }
-        if (parts.length >= 2 && parts[0] === "products" && method === "DELETE") {
+        if (parts.length === 2 && parts[0] === "products" && method === "DELETE") {
+            requireAdmin(init);
+            const id = Number(parts[1]);
+            const product = DB.products.find((p) => p.id === id);
+            if (!product) throw new ApiError(HTTP.NOT_FOUND, "Product not found");
+            DB.products = DB.products.filter((p) => p.id !== id);
+            audit(actorOf(init), "product.delete", "product", id, `${product.name}; stock ${product.stock}`);
+            return noContent();
+        }
+        if (parts.length === 3 && parts[0] === "products" && parts[2] === "restock" && method === "POST") {
+            requireAdmin(init);
+            const p = DB.products.find((x) => x.id === Number(parts[1]));
+            if (!p) throw new ApiError(HTTP.NOT_FOUND, "Product not found");
+            const quantity = Number(body.quantity);
+            if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "quantity must be between 1 and 100000");
+            }
+            if (body.unit_cost != null && body.unit_cost < 0) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "unit_cost must not be negative");
+            }
+            const restock = addRestock(p, quantity, body.unit_cost ?? null, body.note, actorOf(init));
+            const cost = body.unit_cost != null ? ` at ${body.unit_cost} each` : "";
+            audit(actorOf(init), "product.restock", "product", p.id, `${p.name}: +${quantity}${cost}; stock now ${p.stock}`);
+            return response(HTTP.CREATED, restock);
+        }
+        if (parts.length === 3 && parts[0] === "products" && parts[2] === "restocks" && method === "GET") {
             requireAdmin(init);
             const id = Number(parts[1]);
             if (!DB.products.some((p) => p.id === id)) throw new ApiError(HTTP.NOT_FOUND, "Product not found");
-            DB.products = DB.products.filter((p) => p.id !== id);
-            return noContent();
+            return DB.restocks.filter((r) => r.product_id === id).slice().reverse()
+                .slice(0, Number(query.get("limit")) || 50);
+        }
+        if (path === "/restocks" && method === "GET") {
+            requireAdmin(init);
+            return DB.restocks.slice().reverse().slice(0, Number(query.get("limit")) || 50);
         }
         if (parts.length === 3 && parts[0] === "products" && parts[2] === "image" && method === "POST") {
             requireAdmin(init);
@@ -711,14 +939,14 @@
             const file = body.get("file");
             if (!file) throw new ApiError(HTTP.BAD_REQUEST, "Empty file");
             p.image_path = await readAsDataURL(file);
-            return productOut(p);
+            return productOut(p, true);
         }
         if (parts.length === 3 && parts[0] === "products" && parts[2] === "image" && method === "DELETE") {
             requireAdmin(init);
             const p = DB.products.find((x) => x.id === Number(parts[1]));
             if (!p) throw new ApiError(HTTP.NOT_FOUND, "Product not found");
             p.image_path = null;
-            return productOut(p);
+            return productOut(p, true);
         }
 
         if (path === "/orders" && method === "GET") {
@@ -777,8 +1005,14 @@
                     if (p) p.stock += it.quantity;
                 }
             }
+            const previous = order.status;
             order.status = status;
             order.completed_at = status !== "pending" ? fmtDT(new Date()) : order.completed_at;
+            if (previous !== status) {
+                const restored = previous === "pending" && status === "cancelled" ? " (stock restored)" : "";
+                audit(actorOf(init), "order." + status, "order", order.id,
+                    `${customerById(order.customer_id)?.username || "-"}: ${previous} -> ${status}, total ${order.total}${restored}`);
+            }
             return orderOut(order);
         }
 
@@ -821,6 +1055,7 @@
                 balance: stats.balance, total_paid: stats.total_paid,
                 orders: orders.map((o) => ({ ...orderOut(o), items: orderItems(o) })),
                 stats,
+                favorites: favoritesFor(customer.id),
             };
         }
         if (parts.length === 3 && parts[0] === "customers" &&
@@ -836,6 +1071,10 @@
                 order.status = "paid";
                 order.completed_at = fmtDT(new Date());
                 amount += order.total;
+            }
+            if (pending.length) {
+                audit("kiosk", "customer.self_mark_paid", "customer", customer.username,
+                    `${pending.length} order(s) marked paid: ${pending.map((o) => "#" + o.id).join(", ")}; amount ${round2(amount)}`);
             }
             return {
                 username: customer.username,
@@ -854,6 +1093,10 @@
                 o.completed_at = fmtDT(new Date());
                 amount += o.total;
             }
+            if (pending.length) {
+                audit(actorOf(init), "customer.reset_payment", "customer", customer.username,
+                    `${pending.length} order(s) marked paid: ${pending.map((o) => "#" + o.id).join(", ")}; amount ${round2(amount)}`);
+            }
             return {
                 username: customer.username,
                 settled: pending.length,
@@ -866,7 +1109,12 @@
         }
         if (parts.length === 2 && parts[0] === "settings" && method === "PUT") {
             requireAdmin(init);
+            const previous = DB.settings[parts[1]];
             DB.settings[parts[1]] = body.value;
+            if (previous !== body.value) {
+                audit(actorOf(init), "settings.update", "setting", parts[1],
+                    `${parts[1]}: ${previous || "-"} -> ${body.value || "-"}`);
+            }
             return { key: parts[1], value: body.value };
         }
 
@@ -898,6 +1146,7 @@
                 full_name: body.full_name || "", is_active: true, created_at: fmtDT(new Date()),
             };
             DB.users.push(u);
+            audit(actorOf(init), "user.create", "user", u.username);
             return response(HTTP.CREATED, userOut(u));
         }
         if (parts.length === 2 && parts[0] === "users" && method === "PUT") {
@@ -908,15 +1157,22 @@
                 if (body.password.length < 8) throw new ApiError(HTTP.BAD_REQUEST, `password must be at least 8 characters`);
                 u.password = body.password;
             }
+            const changed = [];
+            if (body.password) changed.push("password");
+            if (body.full_name !== undefined && body.full_name !== u.full_name) changed.push("full_name");
+            if (body.is_active !== undefined && body.is_active !== u.is_active) changed.push("is_active");
             if (body.full_name !== undefined) u.full_name = body.full_name;
             if (body.is_active !== undefined) u.is_active = body.is_active;
+            if (changed.length) audit(actorOf(init), "user.update", "user", u.username, "changed: " + changed.join(", "));
             return userOut(u);
         }
         if (parts.length === 2 && parts[0] === "users" && method === "DELETE") {
             requireAdmin(init);
             const id = Number(parts[1]);
-            if (!DB.users.some((u) => u.id === id)) throw new ApiError(HTTP.NOT_FOUND, "User not found");
+            const user = DB.users.find((u) => u.id === id);
+            if (!user) throw new ApiError(HTTP.NOT_FOUND, "User not found");
             DB.users = DB.users.filter((u) => u.id !== id);
+            audit(actorOf(init), "user.delete", "user", user.username);
             return noContent();
         }
 
@@ -940,8 +1196,70 @@
             requireAdmin(init);
             return salesByDay(Number(query.get("days")) || 14);
         }
+        if (path === "/reports/margins" && method === "GET") {
+            requireAdmin(init);
+            const period = query.get("period") || "all";
+            if (!["today", "week", "month", "all"].includes(period)) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "Invalid period");
+            }
+            const [start, end] = periodBounds(period);
+            return { period, ...marginsFor(start, end) };
+        }
+
+        if (path === "/audit" && method === "GET") {
+            requireAdmin(init);
+            const action = query.get("action") || "";
+            const limit = Math.max(1, Math.min(Number(query.get("limit")) || 200, 1000));
+            return DB.audit.filter((e) => e.action.startsWith(action)).slice().reverse().slice(0, limit);
+        }
+
+        if (path === "/system/status" && method === "GET") {
+            requireAdmin(init);
+            const last = DB.audit[DB.audit.length - 1];
+            return {
+                version: "demo", commit: "", python: "n/a (browser demo)",
+                server_time: fmtDT(new Date()), started_at: DEMO_STARTED,
+                uptime_seconds: Math.floor((Date.now() - new Date(DEMO_STARTED).getTime()) / 1000),
+                database: { engine: "in-browser demo", size_bytes: null },
+                counts: {
+                    products: DB.products.length,
+                    active_products: DB.products.filter((p) => p.is_active).length,
+                    low_stock_products: lowStockProducts().length,
+                    customers: DB.customers.length,
+                    orders: DB.orders.length,
+                    pending_orders: DB.orders.filter((o) => o.status === "pending").length,
+                    users: DB.users.length,
+                },
+                last_activity: last ? { at: last.created_at, actor: last.actor, action: last.action } : null,
+                backups: demoBackups(),
+            };
+        }
+        if (path === "/system/backups" && method === "GET") {
+            requireAdmin(init);
+            return demoBackups();
+        }
+        if (path === "/system/backups" && method === "POST") {
+            requireAdmin(init);
+            throw new ApiError(HTTP.BAD_REQUEST, "Backups are not available in the browser demo");
+        }
 
         throw new ApiError(HTTP.NOT_FOUND, "Not Found");
+    }
+
+    const DEMO_STARTED = fmtDT(new Date());
+
+    function demoBackups() {
+        return {
+            supported: false, interval_hours: Number(DB.settings.backup_interval_hours) || 0,
+            keep: Number(DB.settings.backup_keep) || 7, count: 0, total_bytes: 0,
+            last_backup_at: null, items: [],
+        };
+    }
+
+    function assertSpecialWindow(p) {
+        if (p.special_starts_on && p.special_ends_on && p.special_ends_on < p.special_starts_on) {
+            throw new ApiError(HTTP.UNPROCESSABLE, "special_ends_on must not be before special_starts_on");
+        }
     }
 
     async function readAsDataURL(file) {

@@ -34,10 +34,20 @@ sample data. Everything lives in your browser and **resets on reload**.
 - All prices in **EUR** (admin can change the currency in Settings)
 - Product photos uploaded by the admin (PNG/JPEG/WebP/GIF, up to 5 MB)
 - Weekly specials: admin marks products with a special price and they appear at
-  the top of the shop with the discounted price
+  the top of the shop with the discounted price; a special can be scheduled to
+  start and end on given dates and switches itself on and off
+- "Buy again" in the user lookup: the customer's most-bought products as one-tap
+  buttons that add straight to the cart
+- Idle reset: after a configurable time without a touch (default 90 s) the kiosk
+  warns for 10 seconds, then clears the cart and closes open dialogs so the next
+  customer never sees the previous one's cart or balance
 
 **Admin panel** (`/#admin`)
-- Dashboard: outstanding balance, today/week/month/all-time sales, low stock
+- Dashboard: outstanding balance, today/week/month/all-time sales, this month's
+  margin, and a "Restock needed" list (each product has its own alert threshold)
+- Restocking: record deliveries with quantity, purchase price and a note; the
+  delivery history is kept and the purchase price feeds the margin report
+  (purchase prices are staff-only and never sent to the kiosk)
 - Products/Categories management, including product image upload and weekly
   specials (special price, listed at the top of the shop)
 - Barcode-assisted product setup and kiosk checkout (a product can have multiple
@@ -45,8 +55,14 @@ sample data. Everything lives in your browser and **resets on reload**.
 - Orders with paid/cancelled statuses and per-order item detail
 - Customers: balances, per-customer stats, monthly history, reset payment
 - Reports with outstanding balance, sales breakdown, customer/product leaderboards,
-  recent payment insights, and CSV export of inventory, customer balances, and report data
-  (inventory value is estimated using current selling prices, not product cost)
+  recent payment insights, margins per product (today/week/month/all time, using the
+  purchase price at the time of sale), and CSV export of inventory (selling and cost
+  value), restock needs, margins, customer balances, and report data
+- Audit log: who marked orders paid or cancelled, reset or self-marked payments,
+  changed products, prices, stock, settings or users, and took backups, and when
+- System page: backend/frontend version, uptime, database size, counts, and backups
+  (automatic SQLite backups every 24 h by default, newest 7 kept, "Back up now",
+  download)
 - User management (admin accounts)
 - Optional customer self-service payment: when enabled in Settings, the kiosk lookup
   offers "I have paid everything" (off by default; it does not verify identity or payment)
@@ -127,6 +143,12 @@ requests to it over Docker's internal network.
   they survive container rebuilds too).
 - **Migrations run automatically** on backend startup — existing databases are
   upgraded in place, so updates never require a manual step or data wipe.
+- **Automatic backups** (SQLite): a consistent copy of the database is written to
+  `./data/backups/` every 24 hours (Settings: interval, `0` = off; how many to keep,
+  default 7). The admin **System** page lists them, takes one on demand and
+  downloads them. Backups cover the database only, not product images, and they
+  live on the same disk, so copy them elsewhere now and then. PostgreSQL
+  (high-traffic mode) is not backed up by the app; use `pg_dump`.
 - Back up the DB (and product images) before updates:
   `cp -r data data.bak`
 

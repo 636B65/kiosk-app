@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import audit
 from database import get_db
 from due_dates import get_due_date
-from models import Customer, Order, OrderItem, Product
+from models import Customer, Order, OrderItem, Product, User
 from schemas import OrderCreate, OrderItemOut, OrderOut
 from security import get_current_user
 from timeutil import utcnow
@@ -120,6 +121,7 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
                     product_name=product.name,
                     quantity=item.quantity,
                     unit_price=product.effective_price,
+                    unit_cost=product.cost_price,
                 )
             )
 
@@ -137,13 +139,14 @@ def update_order_status(
     order_id: int,
     new_status: str,
     db: Session = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status")
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    previous = order.status
 
     if order.status == "pending" and new_status == "cancelled":
         for item in order.items:
@@ -154,6 +157,13 @@ def update_order_status(
     order.status = new_status
     if new_status != "pending":
         order.completed_at = utcnow()
+    if previous != new_status:
+        restored = " (stock restored)" if previous == "pending" and new_status == "cancelled" else ""
+        audit.record(
+            db, user.username, f"order.{new_status}", "order", order.id,
+            f"{order.customer_username or '-'}: {previous} -> {new_status}, "
+            f"total {order.total}{restored}",
+        )
     db.commit()
     db.refresh(order)
     return order

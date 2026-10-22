@@ -124,8 +124,10 @@ const Admin = {
             ["orders", "🧾", "Orders"],
             ["customers", "👥", "Customers"],
             ["reports", "📈", "Reports"],
+            ["audit", "📜", "Audit log"],
             ["users", "👤", "Users"],
             ["settings", "⚙️", "Settings"],
+            ["system", "🩺", "System"],
         ];
         return `
             <aside class="admin-sidebar">
@@ -150,6 +152,12 @@ const Admin = {
         `;
     },
 
+    // The view container, or null when the admin has already moved on to
+    // another view: a slow render must not overwrite the page now shown.
+    mainFor(view) {
+        return this.view === view ? document.getElementById("admin-main-container") : null;
+    },
+
     async loadView(view) {
         this.view = view;
         switch (view) {
@@ -161,6 +169,8 @@ const Admin = {
             case "reports": return this.renderReports();
             case "users": return this.renderUsers();
             case "settings": return this.renderSettings();
+            case "audit": return this.renderAudit();
+            case "system": return this.renderSystem();
             default: return this.renderDashboard();
         }
     },
@@ -170,7 +180,8 @@ const Admin = {
             API.get("/reports/summary"),
             API.get("/reports/top-products?limit=5"),
         ]);
-        const app = document.getElementById("admin-main-container");
+        const app = this.mainFor("dashboard");
+        if (!app) return;
         app.innerHTML = `
             <div class="admin-main">
                 <h2>Dashboard</h2>
@@ -180,6 +191,7 @@ const Admin = {
                     <div class="stat-card"><div class="label">This Week</div><div class="value">${fmt(summary.week.revenue)}</div></div>
                     <div class="stat-card"><div class="label">This Month</div><div class="value">${fmt(summary.month.revenue)}</div></div>
                     <div class="stat-card"><div class="label">All-time Paid</div><div class="value">${fmt(summary.all_time.revenue)}</div></div>
+                    <div class="stat-card"><div class="label">Margin this month</div><div class="value">${fmt(summary.margin_month.margin)}</div><div class="sub">${summary.margin_month.margin_pct != null ? `${summary.margin_month.margin_pct}% of costed sales` : "no costed sales yet"}</div></div>
                 </div>
                 <div class="panel">
                     <div class="panel-header"><h3>Top Products</h3></div>
@@ -194,15 +206,21 @@ const Admin = {
                         </tbody>
                     </table>
                 </div>
-                <div class="panel">
-                    <div class="panel-header"><h3>Low Stock Alerts</h3></div>
+                <div class="panel" id="restock-needed">
+                    <div class="panel-header"><h3>Restock needed${summary.low_stock_products.length ? ` (${summary.low_stock_products.length})` : ""}</h3></div>
                     <table>
-                        <thead><tr><th>Product</th><th>Stock</th><th>Price</th></tr></thead>
+                        <thead><tr><th>Product</th><th>Stock</th><th>Alert at</th><th>Price</th><th></th></tr></thead>
                         <tbody>
                             ${summary.low_stock_products.length === 0
-                                ? '<tr><td colspan="3">All stock levels are healthy</td></tr>'
+                                ? '<tr><td colspan="5">All stock levels are healthy</td></tr>'
                                 : summary.low_stock_products.map((p) => `
-                                    <tr><td>${esc(p.name)}</td><td style="color:var(--warning);"><strong>${p.stock}</strong></td><td>${fmt(effectivePrice(p))}</td></tr>
+                                    <tr>
+                                        <td>${esc(p.name)}</td>
+                                        <td style="color:${p.stock <= 0 ? "var(--danger)" : "var(--warning)"};"><strong>${p.stock}</strong></td>
+                                        <td>≤ ${p.low_stock_threshold}</td>
+                                        <td>${fmt(effectivePrice(p))}</td>
+                                        <td class="table-actions"><button class="btn btn-secondary" data-action="admin-restock" data-id="${p.id}">Restock</button></td>
+                                    </tr>
                                 `).join("")}
                         </tbody>
                     </table>
@@ -213,8 +231,18 @@ const Admin = {
 
     async renderProducts() {
         await Store.refresh();
-        const app = document.getElementById("admin-main-container");
+        let restocks = [];
+        try {
+            restocks = await API.get("/restocks?limit=15");
+        } catch {}
+        const app = this.mainFor("products");
+        if (!app) return;
         const products = [...Store.products].sort((a, b) => a.id - b.id);
+        const specialBadge = (p) => ({
+            active: ' <span class="weekly-badge">⚡ Weekly</span>',
+            scheduled: ` <span class="weekly-badge badge-muted" title="Starts ${esc(p.special_starts_on)}">⏳ Scheduled</span>`,
+            ended: ' <span class="weekly-badge badge-muted">⌛ Ended</span>',
+        })[specialState(p)] || "";
         app.innerHTML = `
             <div class="admin-main">
                 <h2>Products</h2>
@@ -222,21 +250,23 @@ const Admin = {
                     <button class="btn btn-primary" data-action="admin-new-product">+ New Product</button>
                 </div>
                 <div class="panel">
-                <table>
-                    <thead><tr><th>ID</th><th>Name</th><th>Image</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+                <table id="products-table">
+                    <thead><tr><th>ID</th><th>Name</th><th>Image</th><th>Category</th><th>Price</th><th>Cost</th><th>Stock</th><th>Status</th><th></th></tr></thead>
                     <tbody>
                         ${products.map((p) => `
                             <tr>
                                 <td>${p.id}</td>
-                                <td>${esc(p.name)}${p.is_weekly_special ? ' <span class="weekly-badge">⚡ Weekly</span>' : ""}</td>
+                                <td>${esc(p.name)}${specialBadge(p)}</td>
                                 <td>${p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : "—"}</td>
                                 <td>${p.category ? esc(p.category.name) : "—"}</td>
-                                <td>${p.is_weekly_special && p.special_price != null
+                                <td>${isSpecialActive(p)
                                     ? `<span class="price-old">${fmt(p.price)}</span> <span class="price-special">${fmt(p.special_price)}</span>`
                                     : fmt(p.price)}</td>
-                                <td style="${p.stock <= 5 ? "color:var(--warning); font-weight:600;" : ""}">${p.stock}</td>
+                                <td>${p.cost_price != null ? fmt(p.cost_price) : "—"}</td>
+                                <td style="${isLowStock(p) ? "color:var(--warning); font-weight:600;" : ""}" title="Alert at ≤ ${p.low_stock_threshold ?? 5}">${p.stock}</td>
                                 <td>${p.is_active ? '<span class="status-badge status-completed">Active</span>' : '<span class="status-badge status-cancelled">Inactive</span>'}</td>
                                 <td class="table-actions">
+                                    <button class="btn btn-secondary" data-action="admin-restock" data-id="${p.id}">Restock</button>
                                     <button class="btn btn-secondary edit-product" data-id="${p.id}">Edit</button>
                                     <button class="btn btn-danger delete-product" data-id="${p.id}">Delete</button>
                                 </td>
@@ -244,6 +274,10 @@ const Admin = {
                         `).join("")}
                     </tbody>
                 </table>
+                </div>
+                <div class="panel" id="recent-restocks">
+                    <div class="panel-header"><h3>Recent deliveries</h3></div>
+                    ${this.restockTable(restocks, true)}
                 </div>
             </div>
         `;
@@ -286,9 +320,18 @@ const Admin = {
                         ⚡ Weekly special (listed at top of the shop)
                     </label>
                 </div>
-                <div class="form-group" style="display:${product?.is_weekly_special ? "" : "none"};">
+                <div class="form-group special-fields" style="display:${product?.is_weekly_special ? "" : "none"};">
                     <label>Special price (${esc(Store.settings.currency || "EUR")})</label>
                     <input id="p-special-price" type="number" step="0.01" min="0" value="${product?.special_price ?? ""}">
+                </div>
+                <div class="form-group special-fields" style="display:${product?.is_weekly_special ? "" : "none"};">
+                    <label>Special runs (optional, inclusive dates)</label>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <input id="p-special-start" type="date" value="${esc(product?.special_starts_on || "")}" aria-label="Special starts on">
+                        <span>to</span>
+                        <input id="p-special-end" type="date" value="${esc(product?.special_ends_on || "")}" aria-label="Special ends on">
+                    </div>
+                    <small style="color:var(--muted);">Leave empty to run until you switch it off. The special turns on and off by itself on these dates (UTC).</small>
                 </div>
                 <div class="form-group">
                     <label>Product Image</label>
@@ -306,8 +349,17 @@ const Admin = {
                     ` : ""}
                 </div>
                 <div class="form-group">
+                    <label>Purchase price per unit (${esc(Store.settings.currency || "EUR")}, optional)</label>
+                    <input id="p-cost" type="number" step="0.01" min="0" value="${product?.cost_price ?? ""}">
+                    <small style="color:var(--muted);">Used for margins. Staff only, never shown at the kiosk. Restocking with a price updates it.</small>
+                </div>
+                <div class="form-group">
                     <label>Stock</label>
                     <input id="p-stock" type="number" step="1" min="0" value="${product?.stock ?? ""}" required>
+                </div>
+                <div class="form-group">
+                    <label>Low-stock alert at (units)</label>
+                    <input id="p-threshold" type="number" step="1" min="0" value="${product?.low_stock_threshold ?? 5}" required>
                 </div>
                 <div class="form-group">
                     <label style="display:flex; align-items:center; gap:0.5rem;">
@@ -322,14 +374,20 @@ const Admin = {
             </form>
         `);
         document.getElementById("p-weekly").addEventListener("change", (e) => {
-            const group = document.getElementById("p-special-price").closest(".form-group");
-            if (group) group.style.display = e.target.checked ? "" : "none";
-            if (!e.target.checked) document.getElementById("p-special-price").value = "";
+            document.querySelectorAll("#product-form .special-fields").forEach((group) => {
+                group.style.display = e.target.checked ? "" : "none";
+            });
+            if (!e.target.checked) {
+                for (const fieldId of ["p-special-price", "p-special-start", "p-special-end"]) {
+                    document.getElementById(fieldId).value = "";
+                }
+            }
         });
         document.getElementById("product-form").addEventListener("submit", async (e) => {
             e.preventDefault();
             const isWeekly = document.getElementById("p-weekly").checked;
             const specialPriceInput = document.getElementById("p-special-price").value;
+            const costInput = document.getElementById("p-cost").value;
             const payload = {
                 name: document.getElementById("p-name").value.trim(),
                 description: document.getElementById("p-desc").value,
@@ -343,6 +401,10 @@ const Admin = {
                 is_active: document.getElementById("p-active").checked,
                 is_weekly_special: isWeekly,
                 special_price: isWeekly && specialPriceInput !== "" ? parseFloat(specialPriceInput) : null,
+                special_starts_on: (isWeekly && document.getElementById("p-special-start").value) || null,
+                special_ends_on: (isWeekly && document.getElementById("p-special-end").value) || null,
+                cost_price: costInput !== "" ? parseFloat(costInput) : null,
+                low_stock_threshold: Math.max(0, parseInt(document.getElementById("p-threshold").value) || 0),
             };
             try {
                 const result = id
@@ -389,9 +451,87 @@ const Admin = {
         });
     },
 
+    restockTable(restocks, withProduct) {
+        if (!restocks.length) return '<p style="color:var(--muted); padding:0.75rem 1rem;">No deliveries recorded yet.</p>';
+        return `
+            <table>
+                <thead><tr><th>Date</th>${withProduct ? "<th>Product</th>" : ""}<th>Qty</th><th>Cost / unit</th><th>Stock after</th><th>By</th><th>Note</th></tr></thead>
+                <tbody>
+                    ${restocks.map((r) => `
+                        <tr>
+                            <td>${new Date(r.created_at).toLocaleString()}</td>
+                            ${withProduct ? `<td>${esc(r.product_name)}</td>` : ""}
+                            <td>+${r.quantity}</td>
+                            <td>${r.unit_cost != null ? fmt(r.unit_cost) : "—"}</td>
+                            <td>${r.stock_after}</td>
+                            <td>${esc(r.created_by || "—")}</td>
+                            <td>${esc(r.note || "")}</td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        `;
+    },
+
+    async openRestockModal(id) {
+        let product = Store.products.find((p) => p.id === id);
+        try {
+            if (!product || product.cost_price === undefined) {
+                await Store.refresh();
+                product = Store.products.find((p) => p.id === id);
+            }
+            if (!product) throw new Error("Product not found");
+            const history = await API.get(`/products/${id}/restocks?limit=10`);
+            Modal.open(`
+                <h2>Restock ${esc(product.name)}</h2>
+                <p style="color:var(--muted); margin-bottom:1rem;">In stock now: <strong>${product.stock}</strong> · alert at ≤ ${product.low_stock_threshold ?? 5}</p>
+                <form id="restock-form">
+                    <div class="form-group">
+                        <label>Units received</label>
+                        <input id="r-quantity" type="number" min="1" step="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Purchase price per unit (${esc(Store.settings.currency || "EUR")}, optional)</label>
+                        <input id="r-cost" type="number" min="0" step="0.01" value="${product.cost_price ?? ""}">
+                    </div>
+                    <div class="form-group">
+                        <label>Note (optional)</label>
+                        <input id="r-note" maxlength="200" placeholder="Supplier, invoice number…">
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Add stock</button>
+                    </div>
+                </form>
+                <h3 style="margin:1.25rem 0 0.5rem;">Previous deliveries</h3>
+                ${this.restockTable(history, false)}
+            `);
+            document.getElementById("r-quantity").focus();
+            document.getElementById("restock-form").addEventListener("submit", async (e) => {
+                e.preventDefault();
+                const cost = document.getElementById("r-cost").value;
+                try {
+                    const result = await API.post(`/products/${id}/restock`, {
+                        quantity: parseInt(document.getElementById("r-quantity").value) || 0,
+                        unit_cost: cost !== "" ? parseFloat(cost) : null,
+                        note: document.getElementById("r-note").value,
+                    });
+                    Toast.success(`Added ${result.quantity} × ${result.product_name} (stock now ${result.stock_after})`);
+                    Modal.close();
+                    this.loadView(this.view);
+                } catch (err) {
+                    Toast.error(err.message);
+                }
+            });
+        } catch (err) {
+            Toast.error(err.message);
+        }
+    },
+
     async renderCategories() {
         await Store.refresh();
-        const app = document.getElementById("admin-main-container");
+        const app = this.mainFor("categories");
+        if (!app) return;
         const countByCat = {};
         Store.products.forEach((p) => {
             if (p.category_id != null) countByCat[p.category_id] = (countByCat[p.category_id] || 0) + 1;
@@ -500,7 +640,8 @@ const Admin = {
     async renderOrders() {
         const statusParam = this.orderFilter ? `?status_=${encodeURIComponent(this.orderFilter)}` : "";
         const orders = await API.get("/orders" + statusParam);
-        const app = document.getElementById("admin-main-container");
+        const app = this.mainFor("orders");
+        if (!app) return;
         app.innerHTML = `
             <div class="admin-main">
                 <h2>Orders</h2>
@@ -594,7 +735,8 @@ const Admin = {
 
     async renderCustomers() {
         const customers = await API.get("/customers");
-        const app = document.getElementById("admin-main-container");
+        const app = this.mainFor("customers");
+        if (!app) return;
         app.innerHTML = `
             <div class="admin-main">
                 <h2>Customers</h2>
@@ -736,7 +878,8 @@ const Admin = {
             orders: 0,
         }));
         const ordersMax = Math.max(...revenueByDay.map((d) => d.orders), 1);
-        const app = document.getElementById("admin-main-container");
+        const app = this.mainFor("reports");
+        if (!app) return;
         const customerLeaders = (title, leaders) => `
             <div class="panel">
                 <div class="panel-header"><h3>${title}</h3></div>
@@ -795,6 +938,7 @@ const Admin = {
                         </div>
                     </div>
                 </div>
+                <div class="panel" id="margins-panel"></div>
                 <h3 style="margin:1.5rem 0 0.75rem;">Customer insights</h3>
                 <p style="color:var(--muted); margin:0 0 0.75rem;">Ranked by total paid, then order count, using the payment date in the current day, Monday-start week, and calendar month.</p>
                 <div class="stat-card" style="margin-bottom:1rem;">
@@ -826,6 +970,55 @@ const Admin = {
                 </div>
             </div>
         `;
+        this.renderMargins();
+    },
+
+    marginsPeriod: "month",
+
+    async renderMargins(period = this.marginsPeriod) {
+        this.marginsPeriod = period;
+        const panel = document.getElementById("margins-panel");
+        if (!panel) return;
+        let report;
+        try {
+            report = await API.get(`/reports/margins?period=${encodeURIComponent(period)}`);
+        } catch (err) {
+            panel.innerHTML = `<p style="padding:1rem;">${esc(err.message)}</p>`;
+            return;
+        }
+        const pct = (v) => (v == null ? "—" : `${v}%`);
+        const periods = [["today", "Today"], ["week", "This week"], ["month", "This month"], ["all", "All time"]];
+        panel.innerHTML = `
+            <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <h3>Margins (paid sales)</h3>
+                <div class="toolbar" style="margin:0;">
+                    ${periods.map(([key, label]) => `
+                        <button class="btn ${key === period ? "btn-primary" : "btn-secondary"}" data-action="admin-margins-period" data-period="${key}">${label}</button>
+                    `).join("")}
+                </div>
+            </div>
+            <table>
+                <thead><tr><th>Product</th><th>Units</th><th>Revenue</th><th>Cost</th><th>Margin</th><th>Margin %</th></tr></thead>
+                <tbody>
+                    ${report.products.length === 0
+                        ? '<tr><td colspan="6">No paid sales in this period</td></tr>'
+                        : report.products.map((r) => `
+                            <tr>
+                                <td>${esc(r.product)}${r.uncosted_quantity ? ` <span class="muted-note" title="Sold before a purchase price was set">(${r.uncosted_quantity} without cost)</span>` : ""}</td>
+                                <td>${r.quantity}</td>
+                                <td>${fmt(r.revenue)}</td>
+                                <td>${fmt(r.cost)}</td>
+                                <td style="font-weight:600; color:${r.margin < 0 ? "var(--danger)" : "inherit"};">${fmt(r.margin)}</td>
+                                <td>${pct(r.margin_pct)}</td>
+                            </tr>
+                        `).join("")}
+                </tbody>
+                <tfoot>
+                    <tr><th>Total</th><th>${report.totals.quantity}</th><th>${fmt(report.totals.revenue)}</th><th>${fmt(report.totals.cost)}</th><th>${fmt(report.totals.margin)}</th><th>${pct(report.totals.margin_pct)}</th></tr>
+                </tfoot>
+            </table>
+            <p class="muted-note" style="padding:0.5rem 1rem;">Cost is the purchase price at the time of sale. Units sold before a purchase price was set count as revenue but not toward the margin.</p>
+        `;
     },
 
     async exportReportsCsv() {
@@ -837,9 +1030,161 @@ const Admin = {
         }
     },
 
+    auditFilters: [
+        ["", "Everything"],
+        ["order.", "Orders"],
+        ["customer.", "Payments"],
+        ["product.restock", "Deliveries"],
+        ["product.", "Products"],
+        ["settings.", "Settings"],
+        ["user.", "Users"],
+        ["backup.", "Backups"],
+    ],
+
+    async renderAudit() {
+        const app = this.mainFor("audit");
+        if (!app) return;
+        app.innerHTML = `
+            <div class="admin-main">
+                <h2>Audit log</h2>
+                <p style="color:var(--muted); margin-bottom:1rem;">
+                    Who changed what and when: payments, cancellations, stock, prices, settings,
+                    users and backups. "kiosk" means a customer at the kiosk.
+                </p>
+                <div class="toolbar">
+                    <label for="audit-filter" style="font-weight:600;">Show</label>
+                    <select id="audit-filter" data-action-input="admin-audit-filter">
+                        ${this.auditFilters.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+                    </select>
+                </div>
+                <div class="panel" id="audit-rows"></div>
+            </div>
+        `;
+        await this.renderAuditRows("");
+    },
+
+    async renderAuditRows(action) {
+        const panel = document.getElementById("audit-rows");
+        if (!panel) return;
+        try {
+            const query = action ? `&action=${encodeURIComponent(action)}` : "";
+            const entries = await API.get(`/audit?limit=300${query}`);
+            panel.innerHTML = `
+                <table>
+                    <thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+                    <tbody>
+                        ${entries.length === 0
+                            ? '<tr><td colspan="5">Nothing recorded yet</td></tr>'
+                            : entries.map((e) => `
+                                <tr>
+                                    <td style="white-space:nowrap;">${new Date(e.created_at).toLocaleString()}</td>
+                                    <td><strong>${esc(e.actor)}</strong></td>
+                                    <td><span class="audit-action">${esc(e.action)}</span></td>
+                                    <td>${esc(e.entity)}${e.entity_id ? ` ${esc(e.entity === "order" ? "#" + e.entity_id : e.entity_id)}` : ""}</td>
+                                    <td class="audit-details">${esc(e.details)}</td>
+                                </tr>
+                            `).join("")}
+                    </tbody>
+                </table>
+            `;
+        } catch (err) {
+            Toast.error(err.message);
+        }
+    },
+
+    async renderSystem() {
+        const status = await API.get("/system/status");
+        const app = this.mainFor("system");
+        if (!app) return;
+        const front = AppInfo.info || {};
+        const tag = (v) => (/^\d/.test(v || "") ? "v" + v : (v || "dev"));
+        const short = (c) => (c ? String(c).slice(0, 7) : "—");
+        const released = (v) => /^\d/.test(v || "");
+        const mismatch = released(front.version) && released(status.version) && status.version !== front.version;
+        const noBackupHint = status.database.engine === "postgresql"
+            ? "This installation uses PostgreSQL. Back it up with <code>pg_dump</code>."
+            : `Backups are not available for this database (${esc(status.database.engine)}).`;
+        const b = status.backups;
+        const backupAge = b.last_backup_at ? (Date.now() - new Date(b.last_backup_at).getTime()) / 3600000 : null;
+        const backupStale = b.supported && b.interval_hours > 0 && (backupAge == null || backupAge > b.interval_hours * 2);
+        app.innerHTML = `
+            <div class="admin-main">
+                <h2>System</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="label">Version</div>
+                        <div class="value">${esc(tag(status.version))}</div>
+                        <div class="sub">backend ${esc(short(status.commit))} · frontend ${esc(tag(front.version))} ${esc(short(front.commit))}</div>
+                        ${mismatch ? '<div class="sub" style="color:var(--warning); font-weight:600;">⚠ Backend and frontend versions differ</div>' : ""}
+                    </div>
+                    <div class="stat-card"><div class="label">Uptime</div><div class="value">${fmtDuration(status.uptime_seconds)}</div><div class="sub">since ${new Date(status.started_at).toLocaleString()}</div></div>
+                    <div class="stat-card"><div class="label">Database</div><div class="value">${fmtBytes(status.database.size_bytes)}</div><div class="sub">${esc(status.database.engine)} · Python ${esc(status.python)}</div></div>
+                    <div class="stat-card">
+                        <div class="label">Last backup</div>
+                        <div class="value" style="${backupStale ? "color:var(--danger);" : ""}">${b.last_backup_at ? new Date(b.last_backup_at).toLocaleString() : (b.supported ? "Never" : "n/a")}</div>
+                        <div class="sub">${b.supported ? `${b.count} kept · ${fmtBytes(b.total_bytes)}` : (status.database.engine === "postgresql" ? "PostgreSQL: use pg_dump" : "not available")}</div>
+                    </div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="label">Products</div><div class="value">${status.counts.active_products}</div><div class="sub">${status.counts.products} total · ${status.counts.low_stock_products} need restock</div></div>
+                    <div class="stat-card"><div class="label">Customers</div><div class="value">${status.counts.customers}</div></div>
+                    <div class="stat-card"><div class="label">Orders</div><div class="value">${status.counts.orders}</div><div class="sub">${status.counts.pending_orders} unpaid</div></div>
+                    <div class="stat-card"><div class="label">Last change</div><div class="value" style="font-size:1rem;">${status.last_activity ? esc(status.last_activity.action) : "—"}</div><div class="sub">${status.last_activity ? `${esc(status.last_activity.actor)} · ${new Date(status.last_activity.at).toLocaleString()}` : ""}</div></div>
+                </div>
+                <div class="panel" id="backups-panel">
+                    <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                        <h3>Backups</h3>
+                        ${b.supported ? '<button class="btn btn-primary" data-action="admin-backup-now">Back up now</button>' : ""}
+                    </div>
+                    ${b.supported ? `
+                        <p class="muted-note" style="padding:0 1rem;">
+                            ${b.interval_hours > 0 ? `Automatic backup every ${b.interval_hours} h` : "Automatic backups are off"} ·
+                            keeps the newest ${b.keep} · stored in <code>data/backups/</code> next to the database.
+                            Change this under Settings. Copy backups off the device now and then.
+                        </p>
+                        <table>
+                            <thead><tr><th>Backup</th><th>Taken</th><th>Size</th><th></th></tr></thead>
+                            <tbody>
+                                ${b.items.length === 0
+                                    ? '<tr><td colspan="4">No backups yet</td></tr>'
+                                    : b.items.map((item) => `
+                                        <tr>
+                                            <td><code>${esc(item.name)}</code></td>
+                                            <td>${new Date(item.created_at).toLocaleString()}</td>
+                                            <td>${fmtBytes(item.size_bytes)}</td>
+                                            <td class="table-actions"><button class="btn btn-secondary" data-action="admin-backup-download" data-name="${esc(item.name)}">Download</button></td>
+                                        </tr>
+                                    `).join("")}
+                            </tbody>
+                        </table>
+                    ` : `<p class="muted-note" style="padding:0 1rem 1rem;">${noBackupHint}</p>`}
+                </div>
+            </div>
+        `;
+    },
+
+    async backupNow() {
+        try {
+            const result = await API.post("/system/backups", {});
+            Toast.success(`Backup ${result.name} created (${fmtBytes(result.size_bytes)})`);
+            if (this.view === "system") this.renderSystem();
+        } catch (err) {
+            Toast.error(err.message);
+        }
+    },
+
+    async downloadBackup(name) {
+        try {
+            await API.download(`/system/backups/${encodeURIComponent(name)}`, name);
+        } catch (err) {
+            Toast.error(err.message);
+        }
+    },
+
     async renderUsers() {
         const users = await API.get("/users");
-        const app = document.getElementById("admin-main-container");
+        const app = this.mainFor("users");
+        if (!app) return;
         app.innerHTML = `
             <div class="admin-main">
                 <h2>Users</h2>
@@ -959,12 +1304,13 @@ const Admin = {
 
     async renderSettings() {
         await Store.loadPublicData();
-        const app = document.getElementById("admin-main-container");
         const settings = Store.settings;
         let nextDue = null;
         try {
             nextDue = await API.get("/reports/summary");
         } catch {}
+        const app = this.mainFor("settings");
+        if (!app) return;
         const dueDate = settings.payment_due_date ?? "";
         app.innerHTML = `
             <div class="admin-main">
@@ -1008,6 +1354,25 @@ const Admin = {
                             username can mark that customer's balance as paid.
                         </div>
                     </div>
+                    <div class="form-group" style="border-top:1px solid var(--border); padding-top:1rem;">
+                        <label for="s-kiosk_idle_seconds">Reset the kiosk after inactivity (seconds)</label>
+                        <input id="s-kiosk_idle_seconds" type="number" min="0" step="1" value="${esc(settings.kiosk_idle_seconds ?? "90")}">
+                        <div style="font-size:0.8rem; color:var(--muted); margin-top:0.25rem;">
+                            After this long without a touch, the kiosk warns for 10 seconds and then clears the
+                            cart and closes open dialogs, so the next customer starts fresh. 0 turns it off.
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="s-backup_interval_hours">Automatic database backup every (hours)</label>
+                        <input id="s-backup_interval_hours" type="number" min="0" step="1" value="${esc(settings.backup_interval_hours ?? "24")}">
+                    </div>
+                    <div class="form-group">
+                        <label for="s-backup_keep">Backups to keep</label>
+                        <input id="s-backup_keep" type="number" min="1" max="365" step="1" value="${esc(settings.backup_keep ?? "7")}">
+                        <div style="font-size:0.8rem; color:var(--muted); margin-top:0.25rem;">
+                            0 hours turns automatic backups off; "Back up now" on the System page still works.
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label style="display:flex; align-items:center; gap:0.5rem;">
                             <input type="checkbox" id="s-debug_mode" ${Debug.isOn(settings) ? "checked" : ""}>
@@ -1028,6 +1393,9 @@ const Admin = {
             debug_mode: document.getElementById("s-debug_mode").checked ? "true" : "false",
             payment_due_date: document.getElementById("s-payment_due_date").value.trim(),
             customer_self_service_payment: document.getElementById("s-customer_self_service_payment").checked ? "true" : "false",
+            kiosk_idle_seconds: String(Math.max(0, parseInt(document.getElementById("s-kiosk_idle_seconds").value) || 0)),
+            backup_interval_hours: String(Math.max(0, parseInt(document.getElementById("s-backup_interval_hours").value) || 0)),
+            backup_keep: String(Math.min(365, Math.max(1, parseInt(document.getElementById("s-backup_keep").value) || 7))),
         };
         try {
             for (const [key, value] of Object.entries(fields)) {

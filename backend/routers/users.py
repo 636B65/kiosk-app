@@ -3,6 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+import audit
 from database import get_db
 from models import User
 from schemas import UserCreate, UserOut, UserUpdate
@@ -23,7 +24,7 @@ def list_users(
 def create_user(
     data: UserCreate,
     db: Session = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     if db.query(User).filter(User.username == data.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -33,6 +34,7 @@ def create_user(
         full_name=data.full_name,
     )
     db.add(user)
+    audit.record(db, current_user.username, "user.create", "user", data.username)
     db.commit()
     db.refresh(user)
     return user
@@ -43,11 +45,26 @@ def update_user(
     user_id: int,
     data: UserUpdate,
     db: Session = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    changed = [
+        field
+        for field, value in (
+            ("password", data.password),
+            ("full_name", data.full_name),
+            ("is_active", data.is_active),
+        )
+        if value is not None and (field == "password" or getattr(user, field) != value)
+    ]
+    if changed:
+        # Never log the password itself, only that it changed.
+        audit.record(
+            db, current_user.username, "user.update", "user", user.username,
+            "changed: " + ", ".join(changed),
+        )
     if data.password:
         user.password_hash = get_password_hash(data.password)
     if data.full_name is not None:
@@ -63,12 +80,13 @@ def update_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    audit.record(db, current_user.username, "user.delete", "user", user.username)
     db.delete(user)
     db.commit()
