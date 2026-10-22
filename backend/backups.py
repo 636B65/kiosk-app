@@ -95,11 +95,14 @@ def list_backups(engine: Engine) -> list[dict]:
 
 
 def backup_path(engine: Engine, name: str) -> str | None:
-    """Absolute path of an existing backup, or None for unknown/unsafe names."""
-    if not BACKUP_NAME_RE.match(name or ""):
-        return None
-    path = os.path.join(backup_dir(engine), name)
-    return path if os.path.isfile(path) else None
+    """Absolute path of an existing backup, or None for unknown/unsafe names.
+
+    The path is built only from names found on disk, never from the request.
+    """
+    for item in list_backups(engine):
+        if item["name"] == name:
+            return os.path.join(backup_dir(engine), item["name"])
+    return None
 
 
 def prune(engine: Engine, keep: int) -> list[str]:
