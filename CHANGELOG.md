@@ -2,6 +2,21 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.34] - 2026-10-23
+
+### Changed
+- Dependency updates (Dependabot #31, #32, #33):
+  - backend: FastAPI 0.143.0 -> 0.149.0, SQLAlchemy 2.1.4 -> 2.1.5,
+    pydantic-settings 2.15.0 -> 2.16.0;
+  - backend dev tools: httpx2 2.13.1 -> 2.15.1, Ruff 0.17.0 -> 0.17.1;
+  - e2e: Playwright 1.64.0 -> 1.64.1.
+  No code changes were needed.
+
+### Tests
+- With all three updates on top of 1.0.33: backend 62 tests, E2E 41 steps (Playwright
+  1.64.1), Ruff 0.17.1 and mypy pass on Python 3.12 with the pinned requirements. The
+  Docker + TLS smoke job runs in CI.
+
 ## [1.0.33] - 2026-10-23
 
 ### Fixed
