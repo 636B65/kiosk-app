@@ -99,10 +99,12 @@ docker compose up --build
 The same default mode is available through `./compose.sh`. Set
 `HIGH_TRAFFIC=1` for the optional stack; see
 [High-traffic mode](#high-traffic-mode) before switching a live installation.
-`./compose.sh` also stamps the frontend footer with the current `git describe`
-release and commit; a plain `docker compose up --build` shows `dev` unless
-`APP_VERSION` / `GIT_COMMIT` are set. The footer's **Changelog** button opens
-`CHANGELOG.md`.
+The footer (and the admin System page) shows the running release and commit.
+A plain `docker compose up --build` takes them from the checkout: the newest
+`CHANGELOG.md` version and the checked-out git commit (no git needed in the
+image; without a `.git` folder only the version is shown). `./compose.sh` uses
+`git describe` instead, and `APP_VERSION` / `GIT_COMMIT` override both. The
+footer's **Changelog** button opens `CHANGELOG.md`.
 
 - Customer kiosk: https://localhost
 - Admin panel: https://localhost/#admin

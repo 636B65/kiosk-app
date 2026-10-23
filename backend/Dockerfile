@@ -7,10 +7,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Release info shown on the admin System page (same build args as the frontend).
-ARG APP_VERSION=dev
+# Release info for the admin System page, written the same way as the
+# frontend's version.json (see frontend/Dockerfile and scripts/release-info.sh).
+ARG APP_VERSION=
 ARG GIT_COMMIT=
-ENV APP_VERSION=${APP_VERSION} GIT_COMMIT=${GIT_COMMIT}
+RUN --mount=type=bind,from=repo,target=/tmp/repo \
+    sh /tmp/repo/scripts/release-info.sh /tmp/repo "$APP_VERSION" "$GIT_COMMIT" \
+       > /app/release.json
 
 EXPOSE 8000
 

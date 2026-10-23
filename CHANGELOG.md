@@ -2,6 +2,21 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.33] - 2026-10-23
+
+### Fixed
+- The footer showed "Kiosk dev" and no commit for images built with a plain
+  `docker compose up --build`. Both images now take the release info from the checkout
+  when no `APP_VERSION` / `GIT_COMMIT` build args are given: the newest CHANGELOG.md version
+  and the checked-out commit (read from `.git`, no git needed in the image). The admin
+  System page's backend version uses the same source (`scripts/release-info.sh`).
+
+### Tests
+- Backend: 62 tests (new: release info file and env precedence). The Docker + TLS smoke job
+  now builds without version build args and checks that the footer and the System page
+  both report the CHANGELOG version and the checked-out commit. E2E 41 steps, Ruff, mypy,
+  JavaScript syntax and actionlint pass.
+
 ## [1.0.32] - 2026-10-22
 
 ### Added
