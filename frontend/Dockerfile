@@ -9,16 +9,17 @@ COPY index.html /usr/share/nginx/html/index.html
 COPY css/ /usr/share/nginx/html/css/
 COPY js/ /usr/share/nginx/html/js/
 
-# Release info for the footer. CHANGELOG.md lives in the repo root, so it comes
-# from the named build context "repo" (compose: additional_contexts, buildx:
-# --build-context repo=.). APP_VERSION / GIT_COMMIT are passed as build args by
-# the release workflow, compose.sh and build-offline.sh; plain builds say "dev".
-COPY --from=repo CHANGELOG.md /usr/share/nginx/html/CHANGELOG.md
-ARG APP_VERSION=dev
+# Release info for the footer. CHANGELOG.md, scripts/release-info.sh and the
+# checkout's .git/HEAD + refs come from the named build context "repo" (compose:
+# additional_contexts, buildx: --build-context repo=.), mounted only for this
+# step. APP_VERSION / GIT_COMMIT build args win when given (release workflow,
+# compose.sh, build-offline.sh); otherwise the newest CHANGELOG.md version and
+# the checked-out commit are used, so a plain `docker compose up --build` works.
+ARG APP_VERSION=
 ARG GIT_COMMIT=
-RUN version="$(printf %s "$APP_VERSION" | tr -cd 'A-Za-z0-9._+-')" \
-    && commit="$(printf %s "$GIT_COMMIT" | tr -cd '0-9a-fA-F')" \
-    && printf '{"version": "%s", "commit": "%s"}\n' "${version:-dev}" "$commit" \
+RUN --mount=type=bind,from=repo,target=/tmp/repo \
+    cp /tmp/repo/CHANGELOG.md /usr/share/nginx/html/CHANGELOG.md \
+    && sh /tmp/repo/scripts/release-info.sh /tmp/repo "$APP_VERSION" "$GIT_COMMIT" \
        > /usr/share/nginx/html/version.json
 
 EXPOSE 80 443
