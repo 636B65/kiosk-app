@@ -2,6 +2,31 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.35] - 2026-10-23
+
+### Security
+- Changing a user's password now signs out that user's existing sessions (tokens carry a
+  fingerprint of the password hash). After upgrading, every admin signs in once again.
+- Login no longer reveals which admin usernames exist: an unknown username costs the same
+  password-hash check as a wrong password.
+- New customer usernames created at the kiosk are limited to 64 characters and may not
+  contain control or invisible characters (e.g. zero-width spaces), so a new name cannot
+  pass itself off as an existing customer in the admin panel. Usernames are Unicode
+  normalized (NFC). Existing customers are unaffected.
+- The username suggestions treat `%` and `_` literally, so they no longer list customers
+  without a real prefix.
+- Product prices and special prices can no longer be negative.
+- The in-memory login rate limiter prunes stale entries, so many failing IP addresses
+  cannot grow it without bound.
+- nginx no longer reveals its version (`server_tokens off`).
+- The backend warns at startup when `SECRET_KEY` is shorter than 32 characters.
+
+### Tests
+- New security regression tests: every API route that is not public by design rejects
+  missing, malformed, forged, unsigned (`alg: none`), expired and unknown-user tokens with
+  401; plus tests for the fixes above. Backend: 68 tests. pip-audit and npm audit report
+  no known vulnerabilities.
+
 ## [1.0.34] - 2026-10-23
 
 ### Changed
@@ -10,7 +35,7 @@ All notable changes to the Kiosk App are documented in this file.
     pydantic-settings 2.15.0 -> 2.16.0;
   - backend dev tools: httpx2 2.13.1 -> 2.15.1, Ruff 0.17.0 -> 0.17.1;
   - e2e: Playwright 1.64.0 -> 1.64.1.
-  No code changes were needed.
+- No code changes were needed for any of the three.
 
 ### Tests
 - With all three updates on top of 1.0.33: backend 62 tests, E2E 41 steps (Playwright

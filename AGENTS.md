@@ -151,8 +151,11 @@ tests/e2e/
   products by quantity over non-cancelled orders); the lookup shows them as one-tap
   add-to-cart buttons.
 - **Stock**: decremented at order creation; never negative (400 if insufficient).
+- **Customer usernames**: stored lowercase and NFC-normalized (`normalize_username`). New
+  ones (`validate_new_username`, on first purchase) are at most 64 characters with no
+  control/format characters (422 otherwise); existing customers are not re-validated.
 - **Lookup/suggest is public** (no auth): `GET /api/customers/suggest` returns only matching
-  usernames (max 20) — never balances. `GET /api/customers/{username}` returns full history
+  usernames (max 20; `%`/`_` are matched literally) — never balances. `GET /api/customers/{username}` returns full history
   including balance. Both match usernames case-insensitively (stored lowercase).
 - **Stats**: `CustomerStats` = order count, total spent/paid, balance (sum of pending), avg
   order, items bought, first/last order, top item, orders-per-month + spent/month,
@@ -171,6 +174,12 @@ tests/e2e/
 - Use `timeutil.utcnow()` — never `datetime.utcnow()`. All timestamps are naive UTC.
 - Admin-only endpoints: `dependency=Depends(get_current_user)`. Customer-facing endpoints
   (orders POST, customers GET/suggest/{username}) are public by design — do not protect them.
+  `PUBLIC_ENDPOINTS` in `tests/test_api.py` lists every intentionally public route; the
+  route sweep test fails if any other endpoint answers without a valid token, so a new
+  public endpoint must be added there deliberately.
+- Tokens carry `pwv` (a fingerprint of the password hash, `security.token_claims`); a
+  password change invalidates older tokens. Unknown usernames at login still run a bcrypt
+  check (`_DUMMY_HASH`) so timing does not reveal valid usernames.
 - Schema responses via Pydantic v2 (`model_validate`, `ConfigDict(from_attributes=True)` in schemas.py).
 - `money = round(x, 2)` floats; keep it consistent.
 - Do NOT modify `backend/requirements.txt` / `requirements-dev.txt` unless you also update

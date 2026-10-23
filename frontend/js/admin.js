@@ -140,7 +140,7 @@ const Admin = {
                 </nav>
                 <div class="sidebar-footer">
                     <div style="display:flex; align-items:center; gap:0.6rem;">
-                        <span class="user-icon">${initial}</span>
+                        <span class="user-icon">${esc(initial)}</span>
                         <div>
                             <div style="font-size:0.9rem;">${esc(user.full_name || user.username)}</div>
                             <div style="font-size:0.75rem; color:#94a3b8;">Administrator</div>

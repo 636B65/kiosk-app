@@ -1484,3 +1484,144 @@ def test_release_info_reads_build_file_and_env_wins(tmp_path, monkeypatch):
     release.write_text("not json")
     monkeypatch.delenv("APP_VERSION")
     assert system.release_info() == {"version": "dev", "commit": ""}
+
+
+# --------------------------------------------------------------------------- #
+# Security regression tests
+# --------------------------------------------------------------------------- #
+# Endpoints that are public by design (kiosk + login). Everything else must
+# reject requests without a valid admin token.
+PUBLIC_ENDPOINTS = {
+    ("GET", "/api/health"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/login/form"),
+    ("GET", "/api/categories"),
+    ("GET", "/api/products"),
+    ("GET", "/api/products/{product_id}"),
+    ("GET", "/api/products/barcode/{barcode}"),
+    ("GET", "/api/settings"),
+    ("POST", "/api/orders"),
+    ("GET", "/api/customers/suggest"),
+    ("GET", "/api/customers/{username}"),
+    ("POST", "/api/customers/{username}/self-mark-paid"),
+}
+
+
+def _protected_endpoints(client):
+    import re
+
+    paths = client.app.openapi()["paths"]
+    for path, operations in paths.items():
+        for method in operations:
+            method = method.upper()
+            if (method, path) in PUBLIC_ENDPOINTS:
+                continue
+            yield method, path, re.sub(r"\{[^}]+\}", "1", path)
+
+
+def test_every_non_public_endpoint_requires_a_valid_token(client, admin_headers):
+    import jwt
+
+    from config import settings
+
+    endpoints = list(_protected_endpoints(client))
+    assert len(endpoints) > 30, "the route sweep should see the whole API"
+    forged = jwt.encode(
+        {"sub": "admin"}, "not-the-secret-but-long-enough-for-hs256", algorithm="HS256"
+    )
+    unsigned = jwt.encode({"sub": "admin"}, None, algorithm="none")
+    expired = jwt.encode(
+        {"sub": "admin", "exp": 1}, settings.secret_key, algorithm=settings.algorithm
+    )
+    ghost = jwt.encode(
+        {"sub": "no-such-user"}, settings.secret_key, algorithm=settings.algorithm
+    )
+    for headers in (
+        {},
+        {"Authorization": "Bearer garbage"},
+        {"Authorization": f"Bearer {forged}"},
+        {"Authorization": f"Bearer {unsigned}"},
+        {"Authorization": f"Bearer {expired}"},
+        {"Authorization": f"Bearer {ghost}"},
+    ):
+        for method, path, url in endpoints:
+            r = client.request(method, url, headers=headers, json={})
+            assert r.status_code == 401, f"{method} {path} with {headers or 'no token'}: {r.status_code}"
+
+
+def test_login_checks_a_password_hash_even_for_unknown_users(client, monkeypatch):
+    """Unknown usernames must cost the same bcrypt check as wrong passwords,
+    so response times do not reveal which admin usernames exist."""
+    import security
+
+    calls = []
+    real = security.bcrypt.checkpw
+    monkeypatch.setattr(
+        security.bcrypt, "checkpw", lambda pw, h: calls.append(1) or real(pw, h)
+    )
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        assert security.authenticate_user(db, "nobody-here", "whatever-password") is None
+    finally:
+        db.close()
+    assert calls, "no password hash was checked for an unknown username"
+
+
+def test_password_change_revokes_existing_tokens(client, admin_headers):
+    r = client.post(
+        "/api/users",
+        json={"username": "rotating_user", "password": "first-password"},
+        headers=admin_headers,
+    )
+    user_id = r.json()["id"]
+    login = client.post(
+        "/api/auth/login", json={"username": "rotating_user", "password": "first-password"}
+    )
+    old = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.get("/api/auth/me", headers=old).status_code == 200
+
+    client.put(f"/api/users/{user_id}", json={"password": "second-password"}, headers=admin_headers)
+    assert client.get("/api/auth/me", headers=old).status_code == 401
+
+    fresh = client.post(
+        "/api/auth/login", json={"username": "rotating_user", "password": "second-password"}
+    )
+    new = {"Authorization": f"Bearer {fresh.json()['access_token']}"}
+    assert client.get("/api/auth/me", headers=new).status_code == 200
+    # Changing only the display name keeps sessions alive.
+    client.put(f"/api/users/{user_id}", json={"full_name": "Rotating"}, headers=admin_headers)
+    assert client.get("/api/auth/me", headers=new).status_code == 200
+    client.delete(f"/api/users/{user_id}", headers=admin_headers)
+
+
+def test_new_customer_usernames_are_validated(client, products):
+    item = [{"product_id": products[6]["id"], "quantity": 1}]
+
+    def buy(name):
+        return client.post("/api/orders", json={"customer_username": name, "items": item})
+
+    assert buy("x" * 65).status_code == 422
+    assert buy("ali​ce").status_code == 422  # invisible look-alike of "alice"
+    assert buy("bad\x00name").status_code == 422
+    assert buy("tab\tname").status_code == 422
+    assert buy("   ").status_code in (400, 422)
+    ok = buy("  Åsa Öberg  ")
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["customer_username"] == "åsa öberg"
+    assert buy("x" * 64).status_code == 201
+
+
+def test_customer_suggest_treats_wildcards_literally(client):
+    assert client.get("/api/customers/suggest?q=%25").json() == []
+    assert client.get("/api/customers/suggest?q=_").json() == []
+    assert "alice" in client.get("/api/customers/suggest?q=ali").json()
+
+
+def test_product_prices_cannot_be_negative(client, admin_headers):
+    for field in ("price", "special_price"):
+        r = client.post(
+            "/api/products", json={"name": "Negative", field: -1}, headers=admin_headers
+        )
+        assert r.status_code == 422, field

@@ -8,6 +8,7 @@ import audit
 from database import get_db
 from due_dates import get_due_date
 from models import Customer, Order, OrderItem, Product, User
+from routers.customers import normalize_username, validate_new_username
 from schemas import OrderCreate, OrderItemOut, OrderOut
 from security import get_current_user
 from timeutil import utcnow
@@ -18,11 +19,12 @@ VALID_STATUSES = ("pending", "paid", "cancelled")
 
 
 def get_or_create_customer(db: Session, username: str) -> Customer:
-    name = (username or "").strip().lower()
+    name = normalize_username(username)
     if not name:
         raise HTTPException(status_code=400, detail="A username is required")
     customer = db.query(Customer).filter(Customer.username == name).first()
     if not customer:
+        validate_new_username(name)
         customer = Customer(username=name)
         db.add(customer)
         db.flush()

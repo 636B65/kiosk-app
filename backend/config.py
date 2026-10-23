@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     def secret_key_not_empty(cls, v: str) -> str:
         # Docker Compose may pass SECRET_KEY="" when the host env var is
         # unset; never allow an empty signing key.
+        if v and len(v) < 32:
+            print(
+                "[config] WARNING: SECRET_KEY is shorter than 32 characters; tokens "
+                "signed with a short key are easier to brute-force. Use e.g. "
+                "`openssl rand -base64 48`.",
+                flush=True,
+            )
         return v or secrets.token_urlsafe(48)
 
 

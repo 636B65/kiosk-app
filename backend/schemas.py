@@ -81,6 +81,9 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
+    price: float = Field(default=0.0, ge=0)
+    special_price: Optional[float] = Field(default=None, ge=0)
+
     @model_validator(mode="after")
     def _validate_special_window(self):
         _check_special_window(self.special_starts_on, self.special_ends_on)
@@ -90,8 +93,8 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    price: Optional[float] = None
-    special_price: Optional[float] = None
+    price: Optional[float] = Field(default=None, ge=0)
+    special_price: Optional[float] = Field(default=None, ge=0)
     is_weekly_special: Optional[bool] = None
     special_starts_on: Optional[date] = None
     special_ends_on: Optional[date] = None

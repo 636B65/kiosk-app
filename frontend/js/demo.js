@@ -441,15 +441,18 @@
     function customerById(id) { return DB.customers.find((c) => c.id === id); }
 
     function findCustomer(username) {
-        const name = (username || "").trim().toLowerCase();
+        const name = (username || "").trim().toLowerCase().normalize("NFC");
         return DB.customers.find((c) => c.username === name);
     }
 
     function getOrCreateCustomer(username) {
-        const name = (username || "").trim().toLowerCase();
+        const name = (username || "").trim().toLowerCase().normalize("NFC");
         if (!name) return null;
         let c = findCustomer(name);
         if (!c) {
+            // Same rules as backend routers/customers.py::validate_new_username.
+            if (name.length > 64) throw new ApiError(HTTP.UNPROCESSABLE, "Username must be at most 64 characters");
+            if (/\p{C}/u.test(name)) throw new ApiError(HTTP.UNPROCESSABLE, "Username contains characters that are not allowed");
             c = { id: DB.nextId.customer++, username: name, created_at: fmtDT(new Date()) };
             DB.customers.push(c);
         }

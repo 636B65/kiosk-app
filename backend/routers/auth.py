@@ -13,6 +13,7 @@ from security import (
     authenticate_user,
     create_access_token,
     get_current_user,
+    token_claims,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # ---------------------------------------------------------------------------
 _MAX_FAILED = 5       # lock out after this many failures
 _WINDOW = 15 * 60     # sliding window in seconds (15 minutes)
+_MAX_TRACKED_IPS = 10_000  # prune stale entries beyond this, so memory stays bounded
 
 _failed_attempts: dict[str, list[float]] = {}
 
@@ -59,7 +61,11 @@ def _check_rate_limit(request: Request) -> None:
 
 def _record_failure(request: Request) -> None:
     ip = _client_ip(request)
-    _failed_attempts.setdefault(ip, []).append(time.time())
+    now = time.time()
+    _failed_attempts.setdefault(ip, []).append(now)
+    if len(_failed_attempts) > _MAX_TRACKED_IPS:
+        for key in [k for k, v in _failed_attempts.items() if now - v[-1] >= _WINDOW]:
+            del _failed_attempts[key]
 
 
 def _clear_failures(request: Request) -> None:
@@ -86,7 +92,7 @@ def login(
         )
     _clear_failures(request)
     token = create_access_token(
-        data={"sub": user.username},
+        data=token_claims(user),
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
     return {
@@ -112,7 +118,7 @@ def login_form(
         )
     _clear_failures(request)
     token = create_access_token(
-        data={"sub": user.username},
+        data=token_claims(user),
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
     return {"access_token": token, "token_type": "bearer"}
