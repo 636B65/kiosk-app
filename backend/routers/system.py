@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 
@@ -15,6 +16,23 @@ from timeutil import utcnow
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 STARTED_AT = utcnow()
+# Written at image build time by scripts/release-info.sh (see backend/Dockerfile).
+RELEASE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "release.json")
+
+
+def release_info() -> dict:
+    """Version and commit: APP_VERSION/GIT_COMMIT env first, then the build's file."""
+    info = {"version": "", "commit": ""}
+    try:
+        with open(RELEASE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        info.update({k: str(data.get(k) or "") for k in info})
+    except (OSError, ValueError):
+        pass
+    return {
+        "version": os.environ.get("APP_VERSION") or info["version"] or "dev",
+        "commit": os.environ.get("GIT_COMMIT") or info["commit"],
+    }
 
 
 def _database_size(path: str) -> int:
@@ -48,8 +66,7 @@ def status(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
         database["size_bytes"] = _database_size(path)
     last_audit = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
     return {
-        "version": os.environ.get("APP_VERSION") or "dev",
-        "commit": os.environ.get("GIT_COMMIT") or "",
+        **release_info(),
         "python": platform.python_version(),
         "server_time": now,
         "started_at": STARTED_AT,

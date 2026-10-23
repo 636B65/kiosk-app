@@ -132,7 +132,8 @@ jobs:
       - name: Build and start services (generates self-signed cert)
         env:
           ADMIN_PASSWORD: smoke-test-password
-          GIT_COMMIT: ${{ github.sha }}
+        # No APP_VERSION/GIT_COMMIT on purpose: a plain build must still stamp the
+        # CHANGELOG version and the checked-out commit (checked below).
         run: docker compose up -d --build
 
       - name: Wait for backend + frontend over TLS
@@ -152,10 +153,20 @@ jobs:
           test -f data/tls/server.crt && test -f data/tls/server.key || { echo "cert not generated"; exit 1; }
           echo "self-signed certificate generated at data/tls/"
 
-      - name: Verify footer release info and changelog are served
+      - name: Verify release info (footer + System page) and changelog are served
+        env:
+          ADMIN_PASSWORD: smoke-test-password
         run: |
-          curl -skf https://localhost/version.json | tee /tmp/version.json
-          grep -q '"commit": "${{ github.sha }}"' /tmp/version.json || { echo "commit missing from version.json"; exit 1; }
+          version="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md | head -n 1)"
+          expected="{\"version\": \"$version\", \"commit\": \"$GITHUB_SHA\"}"
+          front="$(curl -skf https://localhost/version.json)"
+          echo "frontend: $front"
+          [ "$front" = "$expected" ] || { echo "version.json != $expected"; exit 1; }
+          token="$(curl -skf https://localhost/api/auth/login -H 'Content-Type: application/json' \
+            -d "{\"username\": \"admin\", \"password\": \"$ADMIN_PASSWORD\"}" | jq -r .access_token)"
+          back="$(curl -skf https://localhost/api/system/status -H "Authorization: Bearer $token" | jq -c '{version, commit}')"
+          echo "backend: $back"
+          [ "$back" = "$(jq -c . <<<"$expected")" ] || { echo "backend release info != $expected"; exit 1; }
           curl -skf https://localhost/CHANGELOG.md | head -n 1 | grep -q '^# Changelog' || { echo "CHANGELOG.md not served"; exit 1; }
 
       - name: Verify HTTP 80 -> HTTPS 443 redirect
