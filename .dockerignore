@@ -9,7 +9,12 @@ data_old/
 offline/
 *.swp
 
-# The repo root is only used as the named build context "repo" by
-# frontend/Dockerfile, which needs nothing but CHANGELOG.md.
+# The repo root is only used as the named build context "repo" by both
+# Dockerfiles, for the release info: the changelog, the script that writes the
+# info, and just enough of .git to resolve the checked-out commit.
 *
 !CHANGELOG.md
+!scripts/release-info.sh
+!.git/HEAD
+!.git/refs
+!.git/packed-refs

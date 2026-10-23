@@ -62,6 +62,7 @@ GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
 docker buildx build \
   --platform "$PLATFORM" \
   --output type=docker,dest="$BUNDLE/kiosk-backend.tar" \
+  --build-context repo=. \
   --build-arg APP_VERSION="${APP_VERSION:-dev}" \
   --build-arg GIT_COMMIT="$GIT_COMMIT" \
   ./backend

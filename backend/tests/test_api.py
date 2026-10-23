@@ -1463,3 +1463,24 @@ def test_system_status_reports_health(client, admin_headers):
     assert status["backups"]["supported"] is True
     assert status["backups"]["interval_hours"] == 24
     assert status["last_activity"]["actor"]
+
+
+def test_release_info_reads_build_file_and_env_wins(tmp_path, monkeypatch):
+    from routers import system
+
+    monkeypatch.delenv("APP_VERSION", raising=False)
+    monkeypatch.delenv("GIT_COMMIT", raising=False)
+    monkeypatch.setattr(system, "RELEASE_FILE", str(tmp_path / "missing.json"))
+    assert system.release_info() == {"version": "dev", "commit": ""}
+
+    release = tmp_path / "release.json"
+    release.write_text('{"version": "1.2.3", "commit": "abc123"}\n')
+    monkeypatch.setattr(system, "RELEASE_FILE", str(release))
+    assert system.release_info() == {"version": "1.2.3", "commit": "abc123"}
+
+    monkeypatch.setenv("APP_VERSION", "9.9.9")
+    assert system.release_info() == {"version": "9.9.9", "commit": "abc123"}
+
+    release.write_text("not json")
+    monkeypatch.delenv("APP_VERSION")
+    assert system.release_info() == {"version": "dev", "commit": ""}
