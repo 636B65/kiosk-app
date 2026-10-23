@@ -75,6 +75,8 @@ frontend/
     admin.js       admin panel (orders, products, categories, customers, users, settings, reports)
     handlers.js    Actions registry (event delegation)
     debug.js       Debug panel
+scripts/
+  release-info.sh  writes the version/commit JSON baked into both images
 tests/e2e/
   e2e.js          main Playwright harness (npm test)
   https-smoke.js  TLS/CSP/admin-login smoke against docker compose
@@ -139,8 +141,8 @@ tests/e2e/
   0 = off) and `backup_keep` (default 7). The scheduler thread first checks after 10 min,
   so tests never trigger it. Endpoints: `GET/POST /api/system/backups`,
   `GET /api/system/backups/{name}` (name must match the backup pattern).
-  `GET /api/system/status` reports version (`APP_VERSION`/`GIT_COMMIT` env, set from the
-  backend image's build args), uptime, DB size, counts and backups.
+  `GET /api/system/status` reports version (`APP_VERSION`/`GIT_COMMIT` env, else the
+  image's `/app/release.json`), uptime, DB size, counts and backups.
 - **Kiosk idle reset**: setting `kiosk_idle_seconds` (default 90, 0 = off). On the
   customer route, if there is anything to clear (cart, open dialog/cart, search,
   category), the kiosk shows a 10 s "Still there?" warning, then empties the cart and
@@ -225,12 +227,17 @@ tests/e2e/
    run manually (workflow_dispatch on `main`); pushing a `v*` tag by hand still runs
    `publish-images.yml` directly. Re-running the `release` job updates an existing release's notes.
 
-The footer shows the running release and commit from `version.json`, which `frontend/Dockerfile`
-writes from the `APP_VERSION` / `GIT_COMMIT` build args (release workflow: tag version + SHA;
-`compose.sh` / `build-offline.sh`: `git describe` + `git rev-parse`; plain builds: `dev`). The
-Changelog button shows `CHANGELOG.md`, copied from the repo root via the named build context
-`repo` (`additional_contexts` in compose, `--build-context repo=.` for buildx). The Pages workflow
-copies both into `frontend/` before upload, and the e2e harness serves the root `CHANGELOG.md`.
+The footer shows the running release and commit from `version.json`; the System page reads the
+backend's `/app/release.json`. Both Dockerfiles write them with `scripts/release-info.sh`, which
+takes the `APP_VERSION` / `GIT_COMMIT` build args when given (release workflow: tag version +
+SHA; `compose.sh` / `build-offline.sh`: `git describe` + `git rev-parse`) and otherwise the newest
+`CHANGELOG.md` version and the commit from `.git/HEAD` + refs, so a plain `docker compose up
+--build` is stamped too (`dev` only without a CHANGELOG version). Both builds need the named build
+context `repo` (`additional_contexts` in compose, `--build-context repo=.` for buildx), mounted
+only for that step; the root `.dockerignore` limits it to the changelog, the script and
+`.git/HEAD`/`refs`/`packed-refs`. The CI Docker smoke job builds without the args and checks both
+values. The Pages workflow copies `CHANGELOG.md` and a `version.json` into `frontend/` before
+upload, and the e2e harness serves the root `CHANGELOG.md`.
 
 **Note:** the GHCR packages are currently **private** (unauthenticated `docker pull` → 401).
 Making them public requires the `read:packages` + `write:packages` scopes on the `gh` token

@@ -2,8 +2,11 @@ services:
   backend:
     build:
       context: ./backend
+      # Repo root, used only for the release info (see the root .dockerignore).
+      additional_contexts:
+        repo: .
       args:
-        APP_VERSION: ${APP_VERSION:-dev}
+        APP_VERSION: ${APP_VERSION:-}
         GIT_COMMIT: ${GIT_COMMIT:-}
     image: kiosk/backend
     ports:
@@ -30,11 +33,11 @@ services:
   frontend:
     build:
       context: ./frontend
-      # Repo root, used only for CHANGELOG.md (see the root .dockerignore).
+      # Repo root, used only for CHANGELOG.md and the release info (see the root .dockerignore).
       additional_contexts:
         repo: .
       args:
-        APP_VERSION: ${APP_VERSION:-dev}
+        APP_VERSION: ${APP_VERSION:-}
         GIT_COMMIT: ${GIT_COMMIT:-}
     image: kiosk/frontend
     ports:
