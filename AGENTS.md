@@ -32,6 +32,7 @@ cd backend && mypy
 node --check frontend/js/*.js
 
 # End-to-end tests (launches backend with E2E_PYTHON + system Chromium; NO Docker needed)
+# Node >= 24.22.1 (CI pins Node 24 LTS and refuses older versions)
 cd tests/e2e && npm ci
 CHROMIUM_PATH=/usr/bin/chromium E2E_PYTHON=python3.12 npm test
 

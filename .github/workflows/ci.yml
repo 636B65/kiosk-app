@@ -48,7 +48,10 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          # Node 20 is end-of-life; 24 is the patched LTS (>= 24.22.1 for the
+          # October 2026 security release, enforced by the check below).
+          node-version: '24'
+          check-latest: true
           cache: 'npm'
           cache-dependency-path: tests/e2e/package-lock.json
 
@@ -82,6 +85,9 @@ jobs:
           fi
           echo "CHROMIUM_PATH=$local_path" >> "$GITHUB_ENV"
 
+      - name: Require a patched Node.js
+        run: node -e 'const [a,b,c]=process.versions.node.split(".").map(Number); if (a<24 || (a===24 && (b<22 || (b===22 && c<1)))) { console.error("Node " + process.version + " is older than 24.22.1 (October 2026 security release)"); process.exit(1); } console.log("Node " + process.version)'
+
       - name: Install npm dependencies
         run: npm ci
 
@@ -102,9 +108,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          # Node 20 is end-of-life; 24 is the patched LTS (>= 24.22.1 for the
+          # October 2026 security release, enforced by the check below).
+          node-version: '24'
+          check-latest: true
           cache: 'npm'
           cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Require a patched Node.js
+        run: node -e 'const [a,b,c]=process.versions.node.split(".").map(Number); if (a<24 || (a===24 && (b<22 || (b===22 && c<1)))) { console.error("Node " + process.version + " is older than 24.22.1 (October 2026 security release)"); process.exit(1); } console.log("Node " + process.version)'
 
       - name: Install npm dependencies
         working-directory: tests/e2e
