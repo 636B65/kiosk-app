@@ -2,6 +2,19 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.36] - 2026-10-25
+
+### Security
+- Node.js October 2026 security release (CVE-2026-105482, -105483, -106069, -111497 and
+  others): the running app is **not affected**, because neither image contains Node.js
+  (backend is Python, frontend is nginx). Node is only used by CI and the E2E harness,
+  where CI ran Node 20, which is end-of-life and not patched. CI now uses Node 24 LTS
+  (`check-latest`) and fails if it gets anything older than 24.22.1. `tests/e2e` declares
+  `engines.node >= 24.22.1`.
+
+### Tests
+- E2E: 41 steps pass on Node 24.22.1; backend 68 tests unchanged.
+
 ## [1.0.35] - 2026-10-23
 
 ### Security

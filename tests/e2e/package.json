@@ -4,6 +4,9 @@
   "private": true,
   "description": "End-to-end Playwright tests for the Kiosk app",
   "type": "commonjs",
+  "engines": {
+    "node": ">=24.22.1"
+  },
   "scripts": {
     "test": "node e2e.js"
   },
