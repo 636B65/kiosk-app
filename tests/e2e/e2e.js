@@ -837,7 +837,7 @@ server.listen(PORT, async () => {
       return "idle 90 s, backup every 24 h, keep 7, self-scanning off";
     });
 
-    // ---- 1.0.37: focus, Esc, customer PINs ----
+    // ---- 1.1.0: focus, Esc, customer PINs ----
     const activeId = () => page.evaluate(() => document.activeElement?.id || "");
     const buyFirstProduct = async (username) => {
       await page.locator(".product-card .add-btn").first().click();

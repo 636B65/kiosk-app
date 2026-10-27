@@ -191,7 +191,7 @@ tests/e2e/
   style adds with `IF NOT EXISTS`-guarded logic). Inspect `sqlite_master` before altering.
   New nullable/defaulted columns go in `ADDED_COLUMNS`, which `add_missing_columns()`
   applies at the end of `migrate()`. SQLite is the only database (the former
-  PostgreSQL + Redis high-traffic mode was removed in 1.0.37).
+  PostgreSQL + Redis high-traffic mode was removed in 1.1.0).
 - Use `timeutil.utcnow()` — never `datetime.utcnow()`. All timestamps are naive UTC.
 - Admin-only endpoints: `dependency=Depends(get_current_user)`. Customer-facing endpoints
   (orders POST, customers GET/suggest/{username}) are public by design — do not protect them.
@@ -243,9 +243,23 @@ tests/e2e/
 | `E2E_PYTHON` | Python used by the e2e harness to launch the backend |
 | `CHROMIUM_PATH` | System Chromium/Chrome binary used by Playwright tests |
 
+## Versioning
+
+Versions follow [Semantic Versioning](https://semver.org/) from 1.1.0 on. Pick the next
+`CHANGELOG.md` version from what the release contains:
+
+- **PATCH** (`1.1.0` -> `1.1.1`): bug and security fixes, dependency bumps, docs and CI only.
+- **MINOR** (`1.1.1` -> `1.2.0`): new features or settings that keep existing installations,
+  data and API clients working (new endpoints, optional fields, new admin views).
+- **MAJOR** (`1.2.0` -> `2.0.0`): changes that break existing clients or deployments, e.g.
+  removing or renaming an endpoint or response field, making an optional request field
+  required, or dropping a supported way to run the app without a migration path.
+
+When unsure whether a change breaks something, ask the user rather than guessing.
+
 ## Release process
 
-1. Bump **CHANGELOG.md** with the new `[x.y.z] - <date>` section and update the test-count line in
+1. Bump **CHANGELOG.md** with the new `[x.y.z] - <date>` section (version per **Versioning** above) and update the test-count line in
    the Tests section.
 2. Commit and push (or merge) to `main`. CI runs (backend + e2e + Docker/TLS smoke).
 3. When that CI run succeeds, `release.yml` (workflow_run on CI) reads the newest

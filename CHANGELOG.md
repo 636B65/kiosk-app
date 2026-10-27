@@ -2,7 +2,11 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
-## [1.0.37] - 2026-10-27
+From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJOR** for
+changes that break existing installations or API clients, **MINOR** for new features that
+stay backwards compatible, **PATCH** for bug and security fixes only.
+
+## [1.1.0] - 2026-10-27
 
 ### Added
 - **Optional customer PIN** (4–8 digits), set or changed from the kiosk user lookup. With a
@@ -41,7 +45,7 @@ All notable changes to the Kiosk App are documented in this file.
   still on v1.0.36 (stop writes and back up both databases first):
   `HIGH_TRAFFIC=1 ./compose.sh run --rm --no-deps backend python migrate_database.py
   --source "$DATABASE_URL" --target sqlite:////app/data/kiosk.db --replace-target`.
-  v1.0.37 only reads `data/kiosk.db`.
+  v1.1.0 only reads `data/kiosk.db`.
 
 ### Tests
 - Backend: 73 tests (new: peppered Argon2id storage, PIN on lookup/order/self-payment,

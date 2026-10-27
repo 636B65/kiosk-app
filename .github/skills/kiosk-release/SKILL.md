@@ -16,7 +16,8 @@ still running or failing.
 1. Read `AGENTS.md` and follow its repository-specific conventions.
 2. Review the worktree and preserve unrelated user changes. Do not commit generated files,
    SQLite databases, TLS certificates, or `node_modules`.
-3. Update `CHANGELOG.md` with the next version and current date. Update the test-count line
+3. Update `CHANGELOG.md` with the next SemVer version (see **Versioning** in `AGENTS.md`)
+   and the current date. Update the test-count line
    to reflect checks actually run.
 4. Run the required checks:
    - `cd backend && pytest tests -v`
@@ -41,8 +42,9 @@ still running or failing.
    If CI fails, diagnose and fix the issue, push the fix, and wait for CI again.
 4. Do not tag by hand. Once main CI succeeds, the `Release` workflow tags the tested commit
    with the newest CHANGELOG.md version (if that tag does not exist yet) and calls
-   `Publish container images`. Use the repository's next-version convention in
-   CHANGELOG.md and never reuse a version.
+   `Publish container images`. Choose the version by Semantic Versioning (see
+   **Versioning** in `AGENTS.md`): PATCH for fixes only, MINOR for backwards-compatible
+   features, MAJOR for breaking changes. Never reuse a version.
 5. Wait for the `Release` workflow run to succeed: its tag job, both image builds, and the
    `release` job that creates the GitHub Release from the tag's CHANGELOG.md section. Do
    not create the release by hand or attach source assets unless requested; if a job fails,
