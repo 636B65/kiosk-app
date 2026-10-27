@@ -104,7 +104,7 @@ def create_backup(db: Session = Depends(get_db), user: User = Depends(get_curren
     if not backups.supported(engine):
         raise HTTPException(
             status_code=400,
-            detail="Backups are only available for the SQLite database; use pg_dump for PostgreSQL",
+            detail="Backups need a SQLite database file",
         )
     result = backups.create_backup(engine, backups.keep_count(db))
     pruned = f"; pruned {len(result['pruned'])}" if result["pruned"] else ""

@@ -7,5 +7,3 @@ bcrypt==5.0.0
 argon2-cffi==25.1.0
 pyjwt==2.15.1
 python-multipart==0.0.32
-psycopg[binary]==3.3.6
-redis==8.1.0

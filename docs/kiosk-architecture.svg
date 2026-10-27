@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 950" role="img" aria-labelledby="title desc">
-  <title id="title">Kiosk App deployment modes</title>
-  <desc id="desc">Side-by-side comparison of the default single-host deployment using Nginx, FastAPI and SQLite, and an optional high-traffic deployment using an Nginx load balancer, multiple Nginx and FastAPI replicas, PostgreSQL and Redis. SQLite and PostgreSQL data can be migrated in either direction.</desc>
+  <title id="title">Kiosk App deployment</title>
+  <desc id="desc">Single-host deployment: customers and staff use the kiosk and admin web app over HTTPS. Nginx terminates TLS, serves the static frontend and proxies /api to one FastAPI backend, which stores data in a SQLite file. Product images, automatic backups and the PIN pepper key live in the same local data folder.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#10172b"/>
@@ -17,115 +17,78 @@
       .title{font-size:34px;font-weight:850;fill:#fff}
       .subtitle{font-size:15px;fill:#aebbd5}
       .panel-title{font-size:14px;font-weight:850;letter-spacing:1.7px}
-      .card-title{font-size:17px;font-weight:800;fill:#f8faff}
-      .body{font-size:13px;fill:#d4deef}
-      .small{font-size:12px;fill:#9eacc8}
+      .card-title{font-size:19px;font-weight:800;fill:#f8faff}
+      .label{font-size:11px;font-weight:800;letter-spacing:1.2px}
+      .small{font-size:13px;fill:#9eacc8}
       .wire{fill:none;stroke:#91a4ca;stroke-width:2.4;marker-end:url(#arrow);opacity:.9}
+      .wire-label{font-size:12px;fill:#b8c5e1}
       .card{filter:url(#shadow);stroke-width:1.3}
     </style>
   </defs>
   <rect width="1680" height="950" fill="url(#bg)"/>
   <circle cx="1530" cy="20" r="230" fill="#8b5cf6" opacity=".08"/>
   <circle cx="110" cy="920" r="230" fill="#22d3ee" opacity=".05"/>
-  <text x="55" y="58" fill="#a5b4fc" font-size="12" font-weight="800" letter-spacing="3">KIOSK APP · DEPLOYMENT OPTIONS</text>
-  <text class="title" x="55" y="106">One shop. Two ways to scale.</text>
-  <text class="subtitle" x="55" y="136">Begin with the simple default. Opt into shared services and replicas only when traffic needs them.</text>
+  <text x="55" y="58" fill="#a5b4fc" font-size="12" font-weight="800" letter-spacing="3">KIOSK APP · DEPLOYMENT</text>
+  <text class="title" x="55" y="106">One shop. One host. One data folder.</text>
+  <text class="subtitle" x="55" y="136">Docker Compose runs an HTTPS nginx frontend and one FastAPI backend with a SQLite database. No outbound calls at runtime.</text>
 
-  <rect x="40" y="175" width="785" height="690" rx="22" fill="#44d7a8" opacity=".045" stroke="#44d7a8" stroke-opacity=".4"/>
-  <rect x="845" y="175" width="795" height="690" rx="22" fill="#22d3ee" opacity=".045" stroke="#22d3ee" stroke-opacity=".5"/>
-  <text class="panel-title" x="72" y="220" fill="#72f0c3">SIMPLE MODE · DEFAULT</text>
-  <text class="small" x="72" y="246">Single host · plain Compose · no Redis or PostgreSQL required</text>
-  <text class="panel-title" x="877" y="220" fill="#67e8f9">HIGH-TRAFFIC MODE · OPTIONAL</text>
-  <text class="small" x="877" y="246">Selected with HIGH_TRAFFIC=1 · replicas share data services</text>
+  <rect x="40" y="175" width="1600" height="690" rx="22" fill="#44d7a8" opacity=".045" stroke="#44d7a8" stroke-opacity=".4"/>
+  <text class="panel-title" x="72" y="220" fill="#72f0c3">DOCKER COMPOSE · SINGLE HOST</text>
+  <text class="small" x="72" y="246">backend (127.0.0.1:8000) + frontend (80 → 443 HTTPS) · ./data bind mount</text>
 
   <g>
-    <path class="wire" d="M300 345H390"/>
-    <path class="wire" d="M420 345H370V505H360"/>
-    <path class="wire" d="M585 390V465"/>
-    <path class="wire" d="M585 580V665"/>
-    <path class="wire" d="M220 580V665"/>
-
-    <path class="wire" d="M1080 345H1180"/>
-    <path class="wire" d="M1180 345H1145V520H1140"/>
-    <path class="wire" d="M1380 390V465"/>
-    <path class="wire" d="M1380 580V665"/>
-    <path class="wire" d="M1240 520H1190V620H1010V665"/>
+    <path class="wire" d="M340 345H520"/>
+    <text class="wire-label" x="430" y="333" text-anchor="middle">HTTPS · port 443</text>
+    <path class="wire" d="M680 390V465"/>
+    <text class="wire-label" x="692" y="432">static files</text>
+    <path class="wire" d="M840 345H1110"/>
+    <text class="wire-label" x="975" y="333" text-anchor="middle">/api proxy (internal network)</text>
+    <path class="wire" d="M1270 390V465"/>
+    <text class="wire-label" x="1282" y="432">SQLAlchemy</text>
+    <path class="wire" d="M1430 345H1500V715H1460"/>
+    <text class="wire-label" x="1512" y="530">files</text>
   </g>
 
   <g class="card">
-    <rect x="80" y="300" width="220" height="90" rx="15" fill="#173e3c" stroke="#44d7a8"/>
-    <text class="card-title" x="190" y="337" text-anchor="middle">Customers + staff</text>
-    <text class="small" x="190" y="365" text-anchor="middle">Kiosk + admin web</text>
+    <rect x="80" y="300" width="260" height="90" rx="15" fill="#173e3c" stroke="#44d7a8"/>
+    <text class="card-title" x="210" y="337" text-anchor="middle">Customers + staff</text>
+    <text class="small" x="210" y="365" text-anchor="middle">Touchscreen kiosk · admin browser</text>
   </g>
   <g class="card">
-    <rect x="420" y="300" width="330" height="90" rx="15" fill="#33244b" stroke="#c084fc"/>
-    <text class="card-title" x="585" y="337" text-anchor="middle">NGINX · HTTPS</text>
-    <text class="small" x="585" y="365" text-anchor="middle">Serves frontend · proxies /api</text>
+    <rect x="520" y="300" width="320" height="90" rx="15" fill="#33244b" stroke="#c084fc"/>
+    <text class="card-title" x="680" y="337" text-anchor="middle">NGINX · HTTPS</text>
+    <text class="small" x="680" y="365" text-anchor="middle">Self-signed TLS by default · CSP headers</text>
   </g>
   <g class="card">
-    <rect x="80" y="465" width="280" height="115" rx="15" fill="#173e3c" stroke="#44d7a8"/>
-    <text x="100" y="496" fill="#72f0c3" font-size="11" font-weight="800" letter-spacing="1.2">WEB APPLICATION</text>
-    <text class="card-title" x="100" y="528">Kiosk + admin UI</text>
-    <text class="small" x="100" y="555">Static vanilla JS files</text>
+    <rect x="520" y="465" width="320" height="125" rx="15" fill="#173e3c" stroke="#44d7a8"/>
+    <text class="label" x="542" y="496" fill="#72f0c3">WEB APPLICATION</text>
+    <text class="card-title" x="542" y="528">Kiosk + admin UI</text>
+    <text class="small" x="542" y="555">Vanilla JS · no build step</text>
+    <text class="small" x="542" y="575">Cart kept in localStorage</text>
   </g>
   <g class="card">
-    <rect x="420" y="465" width="330" height="115" rx="15" fill="#1c3151" stroke="#60a5fa"/>
-    <text x="442" y="496" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.2">API APPLICATION</text>
-    <text class="card-title" x="442" y="528">FastAPI · one instance</text>
-    <text class="small" x="442" y="555">Orders · inventory · reports</text>
+    <rect x="1110" y="300" width="320" height="90" rx="15" fill="#1c3151" stroke="#60a5fa"/>
+    <text class="card-title" x="1270" y="337" text-anchor="middle">FastAPI backend</text>
+    <text class="small" x="1270" y="365" text-anchor="middle">Orders · inventory · reports · JWT admin</text>
   </g>
   <g class="card">
-    <rect x="80" y="665" width="280" height="105" rx="15" fill="#292e3c" stroke="#8d9ab3"/>
-    <text x="100" y="697" fill="#c6d1e6" font-size="11" font-weight="800" letter-spacing="1.2">PERSISTENT FILES</text>
-    <text class="card-title" x="100" y="730">Product images</text>
-    <text class="small" x="100" y="753">Shared local data volume</text>
+    <rect x="1110" y="465" width="320" height="125" rx="15" fill="#40331e" stroke="#f7c66b"/>
+    <text class="label" x="1132" y="496" fill="#f7c66b">DATABASE</text>
+    <text class="card-title" x="1132" y="528">SQLite · data/kiosk.db</text>
+    <text class="small" x="1132" y="555">Schema migrations at startup</text>
+    <text class="small" x="1132" y="575">PINs stored as peppered Argon2id</text>
   </g>
   <g class="card">
-    <rect x="420" y="665" width="330" height="105" rx="15" fill="#40331e" stroke="#f7c66b"/>
-    <text x="442" y="697" fill="#f7c66b" font-size="11" font-weight="800" letter-spacing="1.2">DATABASE</text>
-    <text class="card-title" x="442" y="730">SQLite file</text>
-    <text class="small" x="442" y="753">Startup schema migrations</text>
+    <rect x="520" y="660" width="940" height="110" rx="15" fill="#292e3c" stroke="#8d9ab3"/>
+    <text class="label" x="542" y="691" fill="#c6d1e6">LOCAL DATA FOLDER · ./data</text>
+    <text class="card-title" x="542" y="724">product_images/ · backups/ · pin_pepper.key · tls/</text>
+    <text class="small" x="542" y="750">Automatic VACUUM INTO backups (every 24 h, newest 7 kept) · keep pin_pepper.key with the database</text>
   </g>
 
-  <g class="card">
-    <rect x="880" y="300" width="200" height="90" rx="15" fill="#173e3c" stroke="#44d7a8"/>
-    <text class="card-title" x="980" y="337" text-anchor="middle">Customers + staff</text>
-    <text class="small" x="980" y="365" text-anchor="middle">HTTPS clients</text>
-  </g>
-  <g class="card">
-    <rect x="1180" y="300" width="400" height="90" rx="15" fill="#33244b" stroke="#c084fc"/>
-    <text x="1380" y="337" fill="#d8b4fe" font-size="11" font-weight="800" letter-spacing="1.2" text-anchor="middle">NGINX LOAD BALANCER · TLS</text>
-    <text class="small" x="1380" y="365" text-anchor="middle">Distributes web and API requests to replicas</text>
-  </g>
-  <g class="card">
-    <rect x="880" y="465" width="260" height="115" rx="15" fill="#173e3c" stroke="#44d7a8"/>
-    <text x="900" y="496" fill="#72f0c3" font-size="11" font-weight="800" letter-spacing="1.2">STATIC FRONTEND</text>
-    <text class="card-title" x="900" y="528">NGINX × N</text>
-    <text class="small" x="900" y="555">Replicated web servers</text>
-  </g>
-  <g class="card">
-    <rect x="1240" y="465" width="340" height="115" rx="15" fill="#1c3151" stroke="#60a5fa"/>
-    <text x="1262" y="496" fill="#92c4ff" font-size="11" font-weight="800" letter-spacing="1.2">APPLICATION REPLICAS</text>
-    <text class="card-title" x="1262" y="528">FastAPI × N</text>
-    <text class="small" x="1262" y="555">Stateless · shared image volume</text>
-  </g>
-  <g class="card">
-    <rect x="880" y="665" width="260" height="105" rx="15" fill="#40331e" stroke="#f7c66b"/>
-    <text x="900" y="697" fill="#f7c66b" font-size="11" font-weight="800" letter-spacing="1.2">SHARED DATABASE</text>
-    <text class="card-title" x="900" y="730">PostgreSQL</text>
-    <text class="small" x="900" y="753">Durable store data</text>
-  </g>
-  <g class="card">
-    <rect x="1240" y="665" width="340" height="105" rx="15" fill="#183c45" stroke="#22d3ee"/>
-    <text x="1262" y="697" fill="#67e8f9" font-size="11" font-weight="800" letter-spacing="1.2">SHARED CACHE</text>
-    <text class="card-title" x="1262" y="730">Redis</text>
-    <text class="small" x="1262" y="753">Products · categories · settings</text>
-  </g>
+  <rect x="80" y="800" width="1520" height="42" rx="12" fill="#ffffff" opacity=".055" stroke="#ffffff" stroke-opacity=".15"/>
+  <text x="100" y="826" fill="#d4deef" font-size="12" font-weight="750">Updates:</text>
+  <text x="170" y="826" fill="#b8c5e1" font-size="12">migrations run automatically on startup · back up ./data before upgrading · air-gapped bundles via build-offline.sh / deploy-offline.sh</text>
 
-  <rect x="80" y="800" width="1500" height="42" rx="12" fill="#ffffff" opacity=".055" stroke="#ffffff" stroke-opacity=".15"/>
-  <text x="100" y="826" fill="#d4deef" font-size="12" font-weight="750">Switching modes:</text>
-  <text x="215" y="826" fill="#b8c5e1" font-size="12">migrate SQLite → PostgreSQL to scale up; PostgreSQL → SQLite to return. Stop writes and back up first.</text>
-
-  <text x="48" y="918" fill="#8e9bb6" font-size="11">THE SIMPLE SQLITE DEPLOYMENT REMAINS THE DEFAULT · HIGH-TRAFFIC COMPOSE MODE IS OPT-IN</text>
+  <text x="48" y="918" fill="#8e9bb6" font-size="11">SELF-HOSTED · DOCKER COMPOSE · SQLITE</text>
   <text x="1632" y="918" fill="#8e9bb6" font-size="11" text-anchor="end">EDITABLE SOURCE: docs/kiosk-architecture.drawio</text>
 </svg>

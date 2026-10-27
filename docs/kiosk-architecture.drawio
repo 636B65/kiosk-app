@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net" modified="2026-10-11T19:45:00.000Z" agent="GitHub Copilot" version="24.7.17" type="device">
-  <diagram id="kiosk-architecture" name="Simple + High-Traffic Modes">
-    <mxGraphModel dx="1700" dy="1450" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1750" pageHeight="1450" math="0" shadow="0">
+  <diagram id="kiosk-architecture" name="Single-host deployment">
+    <mxGraphModel dx="1700" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1750" pageHeight="900" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
@@ -16,7 +16,7 @@
         <mxCell id="lane-api" value="APPLICATION SERVICES" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#eaf1fb;swimlaneFillColor=#ffffff;strokeColor=#6c8ebf;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
           <mxGeometry x="950" y="40" width="370" height="820" as="geometry"/>
         </mxCell>
-        <mxCell id="lane-data" value="SIMPLE MODE · DEFAULT PERSISTENCE" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#f1f1f1;swimlaneFillColor=#ffffff;strokeColor=#666666;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
+        <mxCell id="lane-data" value="PERSISTENCE · SQLITE" style="swimlane;html=1;startSize=34;horizontal=1;fillColor=#f1f1f1;swimlaneFillColor=#ffffff;strokeColor=#666666;fontStyle=1;fontSize=14;rounded=1;" vertex="1" parent="1">
           <mxGeometry x="1340" y="40" width="380" height="820" as="geometry"/>
         </mxCell>
 
@@ -76,33 +76,6 @@
           <mxGeometry x="1370" y="710" width="320" height="115" as="geometry"/>
         </mxCell>
 
-        <mxCell id="high-mode-lane" value="OPTIONAL HIGH-TRAFFIC MODE · HIGH_TRAFFIC=1 · migrate data before switching" style="swimlane;html=1;startSize=42;horizontal=1;fillColor=#e1f5fe;swimlaneFillColor=#f8fdff;strokeColor=#00a3c7;fontStyle=1;fontSize=16;rounded=1;" vertex="1" parent="1">
-          <mxGeometry x="20" y="900" width="1700" height="480" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-clients" value="CUSTOMERS + STAFF&#xa;Kiosk and admin&#xa;HTTPS clients" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="55" y="1030" width="210" height="110" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-lb" value="NGINX LOAD BALANCER&#xa;TLS termination&#xa;Routes web and /api requests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="335" y="1015" width="240" height="130" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-frontend" value="FRONTEND REPLICAS&#xa;NGINX × N&#xa;Static kiosk + admin assets" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
-          <mxGeometry x="650" y="1015" width="270" height="130" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-api" value="API REPLICAS&#xa;FastAPI × N&#xa;Stateless application instances" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
-          <mxGeometry x="1010" y="1015" width="270" height="130" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-images" value="SHARED PRODUCT IMAGES&#xa;Mounted data volume&#xa;Visible to API replicas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=13;" vertex="1" parent="1">
-          <mxGeometry x="1010" y="1190" width="270" height="95" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-postgres" value="POSTGRESQL&#xa;Shared durable application data" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=15;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="1360" y="975" width="310" height="105" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-redis" value="REDIS CACHE&#xa;Shared product, category + settings cache" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5f5f5;strokeColor=#00a3c7;fontSize=14;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="1360" y="1110" width="310" height="100" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-migration" value="MODE SWITCHING&#xa;Copy SQLite → PostgreSQL to opt in; copy PostgreSQL → SQLite before returning to default mode. Stop writes and back up both databases first." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
-          <mxGeometry x="335" y="1220" width="585" height="100" as="geometry"/>
-        </mxCell>
 
         <mxCell id="flow-customer" value="browse / buy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#82b366;fontSize=12;" edge="1" parent="1" source="customer" target="kiosk-ui">
           <mxGeometry relative="1" as="geometry"/>
@@ -144,24 +117,6 @@
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
         <mxCell id="flow-demo" value="demo mode bypasses live API" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#d79b00;fontSize=11;" edge="1" parent="1" source="kiosk-ui" target="demo-mock">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-flow-clients" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#00a3c7;fontSize=12;" edge="1" parent="1" source="high-clients" target="high-lb">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-flow-web" value="static web traffic" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#82b366;fontSize=12;" edge="1" parent="1" source="high-lb" target="high-frontend">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-flow-api" value="/api load balanced" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;fontSize=12;" edge="1" parent="1" source="high-lb" target="high-api">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-flow-postgres" value="transactions" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#d6b656;fontSize=11;" edge="1" parent="1" source="high-api" target="high-postgres">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-flow-redis" value="cache reads / invalidation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#00a3c7;fontSize=11;" edge="1" parent="1" source="high-api" target="high-redis">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="high-flow-images" value="image files" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=11;" edge="1" parent="1" source="high-api" target="high-images">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
       </root>

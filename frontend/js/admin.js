@@ -1128,9 +1128,7 @@ const Admin = {
         const short = (c) => (c ? String(c).slice(0, 7) : "—");
         const released = (v) => /^\d/.test(v || "");
         const mismatch = released(front.version) && released(status.version) && status.version !== front.version;
-        const noBackupHint = status.database.engine === "postgresql"
-            ? "This installation uses PostgreSQL. Back it up with <code>pg_dump</code>."
-            : `Backups are not available for this database (${esc(status.database.engine)}).`;
+        const noBackupHint = `Backups are not available for this database (${esc(status.database.engine)}).`;
         const b = status.backups;
         const backupAge = b.last_backup_at ? (Date.now() - new Date(b.last_backup_at).getTime()) / 3600000 : null;
         const backupStale = b.supported && b.interval_hours > 0 && (backupAge == null || backupAge > b.interval_hours * 2);
@@ -1149,7 +1147,7 @@ const Admin = {
                     <div class="stat-card">
                         <div class="label">Last backup</div>
                         <div class="value" style="${backupStale ? "color:var(--danger);" : ""}">${b.last_backup_at ? new Date(b.last_backup_at).toLocaleString() : (b.supported ? "Never" : "n/a")}</div>
-                        <div class="sub">${b.supported ? `${b.count} kept · ${fmtBytes(b.total_bytes)}` : (status.database.engine === "postgresql" ? "PostgreSQL: use pg_dump" : "not available")}</div>
+                        <div class="sub">${b.supported ? `${b.count} kept · ${fmtBytes(b.total_bytes)}` : "not available"}</div>
                     </div>
                 </div>
                 <div class="stats-grid">

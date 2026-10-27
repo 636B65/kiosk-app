@@ -444,24 +444,27 @@ server.listen(PORT, async () => {
 
     await step("customer: scan either barcode to add product to cart", async () => {
       await setSetting("kiosk_barcode_scanning", "true");
-      await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
-      await page.waitForSelector("#barcode-input");
-      const input = page.locator("#barcode-input");
-      await input.fill("0123456789012");
-      await input.press("Enter");
-      await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "1");
-      await input.fill("USB-C-ALT");
-      await input.press("Enter");
-      await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "2");
-      await page.locator(".cart-btn", { hasText: "Cart" }).click();
-      await page.waitForSelector("#cart-overlay");
-      const cart = await page.locator("#cart-overlay").textContent();
-      if (!cart.includes("USB-C Cable") || !cart.includes("× 2")) {
-        throw new Error("barcode scans did not add the same item twice: " + cart);
+      try {
+        await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+        await page.waitForSelector("#barcode-input");
+        const input = page.locator("#barcode-input");
+        await input.fill("0123456789012");
+        await input.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "1");
+        await input.fill("USB-C-ALT");
+        await input.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "2");
+        await page.locator(".cart-btn", { hasText: "Cart" }).click();
+        await page.waitForSelector("#cart-overlay");
+        const cart = await page.locator("#cart-overlay").textContent();
+        if (!cart.includes("USB-C Cable") || !cart.includes("× 2")) {
+          throw new Error("barcode scans did not add the same item twice: " + cart);
+        }
+        await page.locator("#cart-overlay .cart-close").click();
+        await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
+      } finally {
+        await setSetting("kiosk_barcode_scanning", "false");
       }
-      await page.locator("#cart-overlay .cart-close").click();
-      await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
-      await setSetting("kiosk_barcode_scanning", "false");
       return "both codes added USB-C Cable to cart";
     });
 
@@ -887,6 +890,12 @@ server.listen(PORT, async () => {
       await page.keyboard.press("Enter");
       await page.waitForSelector("#lk-pin-group:not([hidden])");
       if ((await activeId()) !== "lk-pin") throw new Error("cursor not in the lookup PIN field");
+      await page.locator('#lk-pin-group [data-action="kiosk-forgot-pin"]').click();
+      const help = await page.locator("#lk-pin-group .pin-forgot-help").textContent();
+      if (!help.includes("Pay your outstanding balance") || !help.includes("tell the staff")) {
+        throw new Error("forgot-PIN help missing: " + help);
+      }
+      await page.locator("#lk-pin").focus();
       await page.keyboard.type("1111");
       await page.keyboard.press("Enter");
       await page.waitForSelector(".toast.error >> text=Wrong PIN", { timeout: 5000 });

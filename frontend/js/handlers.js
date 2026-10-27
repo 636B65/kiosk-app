@@ -51,6 +51,10 @@ Actions.register("kiosk-search", () => Kiosk.renderProductGrid());
 Actions.register("kiosk-idle-continue", () => Kiosk.noteActivity());
 Actions.register("kiosk-buy-again", (el) => Kiosk.buyAgain(parseInt(el.dataset.id)));
 Actions.register("kiosk-open-cart", () => Kiosk.openCartFromModal());
+Actions.register("kiosk-forgot-pin", (el) => {
+    const help = el.parentElement.querySelector(".pin-forgot-help");
+    if (help) help.hidden = false;
+});
 Actions.register("kiosk-pin-setup", (el) =>
     Kiosk.openPinSetup(decodeURIComponent(el.dataset.username), el.dataset.hasPin === "true")
 );

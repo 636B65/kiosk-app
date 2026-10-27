@@ -355,6 +355,12 @@ const Kiosk = {
                     <label for="co-pin">PIN</label>
                     <input id="co-pin" type="password" inputmode="numeric" autocomplete="off"
                            pattern="[0-9]{4,8}" maxlength="8">
+                    <button type="button" class="link-btn" data-action="kiosk-forgot-pin">Forgot your PIN?</button>
+                    <p class="pin-forgot-help" hidden>
+                        Pay your outstanding balance at the counter and tell the staff that you forgot
+                        your PIN. Once your balance is paid, they can remove the PIN, and you can then
+                        set a new one in User lookup.
+                    </p>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
@@ -465,6 +471,12 @@ const Kiosk = {
                     <label for="lk-pin">PIN</label>
                     <input id="lk-pin" type="password" inputmode="numeric" autocomplete="off"
                            pattern="[0-9]{4,8}" maxlength="8">
+                    <button type="button" class="link-btn" data-action="kiosk-forgot-pin">Forgot your PIN?</button>
+                    <p class="pin-forgot-help" hidden>
+                        Pay your outstanding balance at the counter and tell the staff that you forgot
+                        your PIN. Once your balance is paid, they can remove the PIN, and you can then
+                        set a new one in User lookup.
+                    </p>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
@@ -571,6 +583,12 @@ const Kiosk = {
                     <label for="pin-current">Current PIN</label>
                     <input id="pin-current" type="password" inputmode="numeric" autocomplete="off"
                            pattern="[0-9]{4,8}" maxlength="8" required>
+                    <button type="button" class="link-btn" data-action="kiosk-forgot-pin">Forgot your PIN?</button>
+                    <p class="pin-forgot-help" hidden>
+                        Pay your outstanding balance at the counter and tell the staff that you forgot
+                        your PIN. Once your balance is paid, they can remove the PIN, and you can then
+                        set a new one in User lookup.
+                    </p>
                 </div>` : ""}
                 <div class="form-group">
                     <label for="pin-new">New PIN (4–8 digits)</label>

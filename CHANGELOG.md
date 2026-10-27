@@ -19,6 +19,16 @@ All notable changes to the Kiosk App are documented in this file.
 - The cursor goes straight to the username field after Buy and User lookup (and to the
   PIN field when one is needed); **Esc** closes the open dialog (order confirmation,
   lookup, ...) or the cart.
+- **"Forgot your PIN?"** under every PIN field explains what to do: pay the outstanding
+  balance at the counter and tell the staff. Once staff have confirmed the payment (Reset
+  payment) they remove the PIN (Reset PIN), and the customer can set a new one.
+
+### Removed
+- **High-traffic mode** (`docker-compose.high-traffic.yml`, `HIGH_TRAFFIC=1` in
+  `compose.sh`, the load-balancing nginx configs, PostgreSQL support, the Redis cache and
+  `backend/migrate_database.py`). The app runs as one FastAPI backend with SQLite again;
+  scaling will come back later as a separate microservice design. `psycopg` and `redis`
+  are no longer dependencies, and `DATABASE_URL` / `REDIS_URL` are ignored.
 
 ### Fixed
 - "User lookup" no longer also opens the cart behind the lookup dialog.
@@ -27,12 +37,18 @@ All notable changes to the Kiosk App are documented in this file.
 - Back up `data/pin_pepper.key` together with the database. Without it, stored PINs no
   longer match and staff have to reset them.
 - New dependency: `argon2-cffi` 25.1.0.
+- If you ran high-traffic mode, copy the data back to SQLite **before** upgrading, while
+  still on v1.0.36 (stop writes and back up both databases first):
+  `HIGH_TRAFFIC=1 ./compose.sh run --rm --no-deps backend python migrate_database.py
+  --source "$DATABASE_URL" --target sqlite:////app/data/kiosk.db --replace-target`.
+  v1.0.37 only reads `data/kiosk.db`.
 
 ### Tests
-- Backend: 74 tests (new: peppered Argon2id storage, PIN on lookup/order/self-payment,
+- Backend: 73 tests (new: peppered Argon2id storage, PIN on lookup/order/self-payment,
   lockout and unlock, change needs the current PIN, admin reset only when paid, barcode
-  setting default). E2E: 47 steps (focus, Esc, set PIN, PIN on lookup and checkout incl.
-  a wrong PIN, admin reset after payment, self-scanning off by default) on Node 24.22.1.
+  setting default; the PostgreSQL copy test went with high-traffic mode). E2E: 47 steps
+  (focus, Esc, set PIN, "Forgot your PIN?" help, PIN on lookup and checkout incl. a
+  wrong PIN, admin reset after payment, self-scanning off by default) on Node 24.22.1.
   Ruff, mypy and JavaScript syntax pass.
 
 ## [1.0.36] - 2026-10-25

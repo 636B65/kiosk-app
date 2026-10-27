@@ -20,8 +20,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # ---------------------------------------------------------------------------
 # Simple in-memory rate limiter for login attempts (per client IP).
-# For a single-process kiosk deployment this is sufficient; a distributed
-# store (Redis, etc.) would be needed for multi-node setups.
+# The kiosk backend runs as a single process, so in-memory state is enough.
 # ---------------------------------------------------------------------------
 _MAX_FAILED = 5       # lock out after this many failures
 _WINDOW = 15 * 60     # sliding window in seconds (15 minutes)

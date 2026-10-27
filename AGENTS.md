@@ -53,7 +53,7 @@ backend/
   config.py        Settings (pydantic-settings, env_file=".env"), SECRET_KEY handling
   database.py      SQLite engine + session (read DATABASE_PATH at import time)
   models.py        User, Category, Product, Customer, Order, OrderItem, Setting
-  migrations.py    idempotent SQLite ALTER TABLE-style migrations + ADDED_COLUMNS (all dialects), run at startup
+  migrations.py    idempotent SQLite ALTER TABLE-style migrations + ADDED_COLUMNS, run at startup
   seed.py          admin user (ADMIN_PASSWORD or random) + demo categories/products/settings
   audit.py         audit.record(db, actor, action, ...) helper (no commit; caller commits)
   pins.py          customer PINs: Argon2id over HMAC-SHA256(pepper, pin); pepper outside the DB
@@ -121,8 +121,7 @@ tests/e2e/
   product later changes.
 - **Purchase prices / margins**: `Product.cost_price` is staff-only. Public product
   endpoints (`GET /api/products`, `/{id}`, `/barcode/{code}`) return `cost_price: null`
-  unless a valid admin token is sent (`get_optional_user`), and the Redis cache only
-  stores/serves requests without an `Authorization` header. Orders snapshot the cost
+  unless a valid admin token is sent (`get_optional_user`). Orders snapshot the cost
   into `OrderItem.unit_cost` (never exposed in order/lookup schemas).
   `GET /api/reports/margins?period=today|week|month|all` reports revenue, cost and
   margin of paid lines; lines without a cost count as revenue but not toward margin.
@@ -169,6 +168,9 @@ tests/e2e/
   "Scan barcode" field; the barcode lookup endpoint itself stays public.
 - **Kiosk focus/Esc**: Buy and User lookup put the cursor in the username field (then the
   PIN field when one is asked for); Esc closes the open dialog, else the cart.
+- **Forgotten PIN**: every PIN field has "Forgot your PIN?", which explains that the
+  customer must pay the balance and tell the staff; staff then confirm payment (Reset
+  payment) and remove the PIN (Reset PIN), after which the customer may set a new one.
 - **Customer usernames**: stored lowercase and NFC-normalized (`normalize_username`). New
   ones (`validate_new_username`, on first purchase) are at most 64 characters with no
   control/format characters (422 otherwise); existing customers are not re-validated.
@@ -188,7 +190,8 @@ tests/e2e/
 - Run migrations in `migrations.py` (idempotent, `migrate(engine)`, uses `ALTER TABLE`
   style adds with `IF NOT EXISTS`-guarded logic). Inspect `sqlite_master` before altering.
   New nullable/defaulted columns go in `ADDED_COLUMNS`, which `add_missing_columns()`
-  applies on SQLite **and** PostgreSQL (high-traffic mode skips `migrate()`).
+  applies at the end of `migrate()`. SQLite is the only database (the former
+  PostgreSQL + Redis high-traffic mode was removed in 1.0.37).
 - Use `timeutil.utcnow()` — never `datetime.utcnow()`. All timestamps are naive UTC.
 - Admin-only endpoints: `dependency=Depends(get_current_user)`. Customer-facing endpoints
   (orders POST, customers GET/suggest/{username}) are public by design — do not protect them.

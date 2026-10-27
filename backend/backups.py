@@ -4,8 +4,7 @@ Backups are consistent snapshots made with ``VACUUM INTO`` (safe while the
 app is serving requests) and stored next to the database in ``backups/``.
 A background thread takes one every ``backup_interval_hours`` (setting,
 default 24, ``0`` disables automatic backups) and keeps the newest
-``backup_keep`` files (setting, default 7). PostgreSQL deployments are not
-handled here; back those up with ``pg_dump``.
+``backup_keep`` files (setting, default 7).
 """
 
 import logging
