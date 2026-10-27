@@ -7,7 +7,8 @@ const Kiosk = {
             if (qty) this.changeQty(parseInt(qty.dataset.id), parseInt(qty.dataset.delta));
             const cat = e.target.closest(".category-pill");
             if (cat) this.setCategory(parseInt(cat.dataset.id));
-            const cartBtn = e.target.closest(".cart-btn");
+            // #lookup-btn shares the .cart-btn style but must not open the cart.
+            const cartBtn = e.target.closest(".cart-btn:not(#lookup-btn)");
             if (cartBtn) this.toggleCart();
             const lookupBtn = e.target.closest("#lookup-btn");
             if (lookupBtn) this.openLookup();
@@ -97,6 +98,7 @@ const Kiosk = {
 
     resetSession() {
         this.cancelIdleWarning();
+        this.lookupPin = "";
         Store.cart = [];
         Store.saveCart();
         Store.activeCategory = null;
@@ -112,11 +114,12 @@ const Kiosk = {
         return `
             <header class="kiosk-header">
                 <h1>🛍️ ${esc(name)}</h1>
+                ${Store.settings.kiosk_barcode_scanning === "true" ? `
                 <form id="barcode-scan-form" class="barcode-scan-form">
                     <input id="barcode-input" aria-label="Scan product barcode"
                            placeholder="Scan barcode…" autocomplete="off" autocapitalize="off">
                     <button type="submit">Scan</button>
-                </form>
+                </form>` : ""}
                 <div style="display:flex; gap:0.75rem;">
                     <button class="cart-btn" id="lookup-btn">🔍 User lookup</button>
                     <button class="cart-btn">🛒 Cart <span class="cart-badge" id="cart-count">${Store.cartCount()}</span></button>
@@ -345,8 +348,13 @@ const Kiosk = {
             <p style="color:var(--muted);">Enter your username to add this purchase to your balance.</p>
             <form id="checkout-form">
                 <div class="form-group">
-                    <label>Username</label>
+                    <label for="co-username">Username</label>
                     <input id="co-username" autocomplete="off" required>
+                </div>
+                <div class="form-group" id="co-pin-group" hidden>
+                    <label for="co-pin">PIN</label>
+                    <input id="co-pin" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8">
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
@@ -354,13 +362,33 @@ const Kiosk = {
                 </div>
             </form>
         `);
+        document.getElementById("co-username").focus();
         document.getElementById("checkout-form").addEventListener("submit", (e) => {
             e.preventDefault();
-            this.placeOrder(document.getElementById("co-username").value);
+            this.placeOrder(
+                document.getElementById("co-username").value,
+                document.getElementById("co-pin").value
+            );
         });
     },
 
-    async placeOrder(username) {
+    // Show the PIN field in an open form and put the cursor in it.
+    askForPin(groupId, inputId, message) {
+        const group = document.getElementById(groupId);
+        const input = document.getElementById(inputId);
+        if (!group || !input) return;
+        group.hidden = false;
+        input.required = true;
+        input.value = "";
+        input.focus();
+        if (message) Toast.error(message);
+    },
+
+    isPinError(err) {
+        return err.status === 428 || err.status === 429 || (err.status === 403 && err.message === "Wrong PIN");
+    },
+
+    async placeOrder(username, pin = "") {
         const userName = username.trim();
         if (!userName) {
             Toast.error("Enter your username");
@@ -368,7 +396,9 @@ const Kiosk = {
         }
         try {
             const items = Store.cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
-            const order = await API.post("/orders", { customer_username: userName, items, notes: "" });
+            const order = await API.post("/orders", {
+                customer_username: userName, items, notes: "", customer_pin: pin || null,
+            });
             Store.cart = [];
             Store.saveCart();
             document.getElementById("cart-overlay")?.remove();
@@ -376,10 +406,18 @@ const Kiosk = {
             this.renderBody();
             let history = null;
             try {
-                history = await API.get(`/customers/${encodeURIComponent(userName)}`);
+                history = await API.request(`/customers/${encodeURIComponent(userName)}`, {
+                    headers: pin ? { "X-Customer-PIN": pin } : {},
+                });
             } catch {}
             this.renderConfirmation(order, history);
         } catch (err) {
+            if (this.isPinError(err)) {
+                // Keep the dialog and cart; ask for (another) PIN.
+                this.askForPin("co-pin-group", "co-pin",
+                    err.status === 428 ? "This account is protected with a PIN" : err.message);
+                return;
+            }
             Toast.error(err.message);
             await Store.loadPublicData();
             this.renderBody();
@@ -406,7 +444,11 @@ const Kiosk = {
         `);
     },
 
+    // PIN that unlocked the lookup shown now; needed to refresh it after changes.
+    lookupPin: "",
+
     openLookup() {
+        this.lookupPin = "";
         Modal.open(`
             <h2>Payment lookup</h2>
             <p style="color:var(--muted);">Start typing to see matching usernames.</p>
@@ -419,16 +461,25 @@ const Kiosk = {
                         <div id="lk-suggestions" class="lookup-suggestions"></div>
                     </div>
                 </div>
+                <div class="form-group" id="lk-pin-group" hidden>
+                    <label for="lk-pin">PIN</label>
+                    <input id="lk-pin" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8">
+                </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
                     <button type="submit" class="btn btn-primary">Look up</button>
                 </div>
             </form>
         `);
+        document.getElementById("lk-username").focus();
         document.getElementById("lookup-form").addEventListener("submit", (e) => {
             e.preventDefault();
             this.clearSuggestions();
-            this.lookupUser(document.getElementById("lk-username").value);
+            this.lookupUser(
+                document.getElementById("lk-username").value,
+                document.getElementById("lk-pin").value
+            );
         });
     },
 
@@ -483,15 +534,85 @@ const Kiosk = {
         this.lookupUser(username);
     },
 
-    async lookupUser(username) {
+    async lookupUser(username, pin = "") {
         const userName = username.trim();
         if (!userName) return;
         try {
-            const data = await API.get(`/customers/${encodeURIComponent(userName)}`);
+            const data = await this.fetchLookup(userName, pin);
+            this.lookupPin = pin;
             Kiosk.showLookup(data);
         } catch (err) {
+            if (this.isPinError(err) && document.getElementById("lk-pin-group")) {
+                this.askForPin("lk-pin-group", "lk-pin",
+                    err.status === 428 ? "This account is protected with a PIN" : err.message);
+                return;
+            }
             Toast.error(err.message);
         }
+    },
+
+    fetchLookup(username, pin) {
+        return API.request(`/customers/${encodeURIComponent(username)}`, {
+            headers: pin ? { "X-Customer-PIN": pin } : {},
+        });
+    },
+
+    openPinSetup(username, hasPin) {
+        Modal.open(`
+            <h2>${hasPin ? "Change PIN" : "Protect your account with a PIN"}</h2>
+            <p style="color:var(--muted); margin-bottom:1rem;">
+                With a PIN (4 to 8 digits), nobody can buy on your tab or see your balance
+                without it. The staff can never see your PIN; if you forget it, they can
+                remove it once your balance is paid.
+            </p>
+            <form id="pin-form">
+                ${hasPin ? `
+                <div class="form-group">
+                    <label for="pin-current">Current PIN</label>
+                    <input id="pin-current" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8" required>
+                </div>` : ""}
+                <div class="form-group">
+                    <label for="pin-new">New PIN (4–8 digits)</label>
+                    <input id="pin-new" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8" required>
+                </div>
+                <div class="form-group">
+                    <label for="pin-repeat">Repeat the new PIN</label>
+                    <input id="pin-repeat" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8" required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save PIN</button>
+                </div>
+            </form>
+        `);
+        document.getElementById(hasPin ? "pin-current" : "pin-new").focus();
+        document.getElementById("pin-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const pin = document.getElementById("pin-new").value;
+            if (!/^[0-9]{4,8}$/.test(pin)) {
+                Toast.error("The PIN must be 4 to 8 digits");
+                return;
+            }
+            if (pin !== document.getElementById("pin-repeat").value) {
+                Toast.error("The PINs do not match");
+                document.getElementById("pin-repeat").focus();
+                return;
+            }
+            try {
+                await API.post(`/customers/${encodeURIComponent(username)}/pin`, {
+                    pin,
+                    current_pin: hasPin ? document.getElementById("pin-current").value : null,
+                });
+                this.lookupPin = pin;
+                this.showLookup(await this.fetchLookup(username, pin));
+                Toast.success(hasPin ? "PIN changed" : "PIN set. You will need it to buy and look up.");
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
     },
 
     showLookup(data) {
@@ -551,6 +672,11 @@ const Kiosk = {
                         I have paid everything
                     </button>
                 ` : ""}
+                <button class="btn btn-secondary" data-action="kiosk-pin-setup"
+                        data-username="${esc(encodeURIComponent(data.customer.username))}"
+                        data-has-pin="${data.customer.has_pin ? "true" : "false"}">
+                    ${data.customer.has_pin ? "🔒 Change PIN" : "🔒 Set a PIN"}
+                </button>
                 <button class="btn btn-secondary" data-action="modal-close">Close</button>
                 <button class="btn btn-primary" data-action="kiosk-open-lookup">Another user</button>
             </div>
@@ -610,11 +736,12 @@ const Kiosk = {
         `);
         document.getElementById("confirm-self-payment").addEventListener("click", async () => {
             try {
-                const result = await API.post(
+                const headers = this.lookupPin ? { "X-Customer-PIN": this.lookupPin } : {};
+                const result = await API.request(
                     `/customers/${encodeURIComponent(username)}/self-mark-paid`,
-                    {}
+                    { method: "POST", body: "{}", headers }
                 );
-                const history = await API.get(`/customers/${encodeURIComponent(username)}`);
+                const history = await this.fetchLookup(username, this.lookupPin);
                 this.showLookup(history);
                 Toast.success(`${result.settled} order(s) marked paid for ${result.username}`);
             } catch (err) {

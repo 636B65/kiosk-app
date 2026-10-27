@@ -115,8 +115,16 @@ class Customer(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     created_at = Column(DateTime, default=utcnow)
+    # Optional kiosk PIN: Argon2id over a peppered HMAC (see pins.py), never the PIN.
+    pin_hash = Column(String, nullable=True)
+    pin_failed_attempts = Column(Integer, default=0)
+    pin_locked_until = Column(DateTime, nullable=True)
 
     orders = relationship("Order", back_populates="customer")
+
+    @property
+    def has_pin(self):
+        return bool(self.pin_hash)
 
 
 class Order(Base):

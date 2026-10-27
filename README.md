@@ -38,6 +38,14 @@ sample data. Everything lives in your browser and **resets on reload**.
   start and end on given dates and switches itself on and off
 - "Buy again" in the user lookup: the customer's most-bought products as one-tap
   buttons that add straight to the cart
+- Optional PIN (4–8 digits) per customer, set from the user lookup: with a PIN nobody can
+  buy on the tab, see the balance or self-mark it paid without it. PINs are stored as
+  Argon2id over a peppered HMAC (the pepper lives in `data/pin_pepper.key`, outside the
+  database and its backups — keep a copy of that file), 5 wrong PINs lock the account for
+  15 minutes, and staff can only remove a forgotten PIN once the balance is paid
+- The cursor jumps to the username (and PIN) field on Buy and User lookup; Esc closes
+  dialogs
+- Self-scanning of product barcodes at the kiosk, off by default (Settings)
 - Idle reset: after a configurable time without a touch (default 90 s) the kiosk
   warns for 10 seconds, then clears the cart and closes open dialogs so the next
   customer never sees the previous one's cart or balance

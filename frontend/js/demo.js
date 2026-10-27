@@ -56,6 +56,7 @@
             debug_mode: "false",
             customer_self_service_payment: "false",
             kiosk_idle_seconds: "90",
+            kiosk_barcode_scanning: "false",
             backup_interval_hours: "24",
             backup_keep: "7",
         },
@@ -459,6 +460,38 @@
         return c;
     }
 
+    // Customer PINs. The real backend stores Argon2id(HMAC(pepper, pin)); this
+    // in-browser demo keeps the PIN in memory only, since nothing is persisted.
+    function customerOut(c) {
+        return { id: c.id, username: c.username, created_at: c.created_at, has_pin: !!c.pin };
+    }
+
+    function pinFrom(init) {
+        const hdr = (init && init.headers) || {};
+        return hdr["X-Customer-PIN"] || hdr["x-customer-pin"] || "";
+    }
+
+    function checkPin(customer, pin) {
+        if (!customer.pin) return;
+        const now = Date.now();
+        if (customer.pinLockedUntil && customer.pinLockedUntil > now) {
+            const minutes = Math.ceil((customer.pinLockedUntil - now) / 60000);
+            throw new ApiError(HTTP.TOO_MANY, `Too many wrong PINs. Try again in ${minutes} minute(s).`);
+        }
+        if (!pin) throw new ApiError(HTTP.PRECONDITION_REQUIRED, "PIN required");
+        if (pin !== customer.pin) {
+            customer.pinFailed = (customer.pinFailed || 0) + 1;
+            if (customer.pinFailed >= 5) {
+                customer.pinFailed = 0;
+                customer.pinLockedUntil = now + 15 * 60000;
+                audit("kiosk", "customer.pin_locked", "customer", customer.username, "5 wrong PINs; locked for 15 min");
+            }
+            throw new ApiError(HTTP.FORBIDDEN, "Wrong PIN");
+        }
+        customer.pinFailed = 0;
+        customer.pinLockedUntil = null;
+    }
+
     function pendingOrdersFor(customerId) {
         return DB.orders.filter((o) => o.customer_id === customerId && o.status === "pending");
     }
@@ -764,6 +797,8 @@
         CONFLICT: 409,
         NOT_FOUND: 404,
         UNPROCESSABLE: 422,
+        PRECONDITION_REQUIRED: 428,
+        TOO_MANY: 429,
     };
 
     function response(status, data) {
@@ -967,6 +1002,8 @@
             return orderItems(order);
         }
         if (path === "/orders" && method === "POST") {
+            const existing = findCustomer(body.customer_username);
+            if (existing) checkPin(existing, body.customer_pin || "");
             const customer = getOrCreateCustomer(body.customer_username);
             if (!customer) throw new ApiError(HTTP.BAD_REQUEST, "A username is required");
             if (!body.items || body.items.length === 0) throw new ApiError(HTTP.BAD_REQUEST, "Order must contain items");
@@ -1028,7 +1065,7 @@
                     const stats = statsFor(c.id);
                     const orders = DB.orders.filter((o) => o.customer_id === c.id);
                     return {
-                        id: c.id, username: c.username, created_at: c.created_at,
+                        ...customerOut(c),
                         balance: stats.balance, total_paid: stats.total_paid,
                         order_count: orders.length, stats,
                     };
@@ -1049,12 +1086,13 @@
         if (parts.length === 2 && parts[0] === "customers" && parts[1] !== "suggest" && method === "GET") {
             const customer = findCustomer(decodeURIComponent(parts[1]));
             if (!customer) throw new ApiError(HTTP.NOT_FOUND, "Customer not found");
+            if (!(query.get("as_admin") === "true" && currentUser(init))) checkPin(customer, pinFrom(init));
             const orders = DB.orders
                 .filter((o) => o.customer_id === customer.id)
                 .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
             const stats = statsFor(customer.id);
             return {
-                customer: { id: customer.id, username: customer.username, created_at: customer.created_at },
+                customer: customerOut(customer),
                 balance: stats.balance, total_paid: stats.total_paid,
                 orders: orders.map((o) => ({ ...orderOut(o), items: orderItems(o) })),
                 stats,
@@ -1068,6 +1106,7 @@
             }
             const customer = findCustomer(decodeURIComponent(parts[1]));
             if (!customer) throw new ApiError(HTTP.NOT_FOUND, "Customer not found");
+            checkPin(customer, pinFrom(init));
             const pending = pendingOrdersFor(customer.id);
             let amount = 0;
             for (const order of pending) {
@@ -1084,6 +1123,31 @@
                 settled: pending.length,
                 amount: Math.round(amount * 100) / 100,
             };
+        }
+        if (parts.length === 3 && parts[0] === "customers" && parts[2] === "pin" && method === "POST") {
+            const customer = findCustomer(decodeURIComponent(parts[1]));
+            if (!customer) throw new ApiError(HTTP.NOT_FOUND, "Customer not found");
+            if (!/^[0-9]{4,8}$/.test(body.pin || "")) throw new ApiError(HTTP.UNPROCESSABLE, "The PIN must be 4 to 8 digits");
+            const changing = !!customer.pin;
+            if (changing) checkPin(customer, body.current_pin || "");
+            customer.pin = body.pin;
+            audit("kiosk", changing ? "customer.pin_changed" : "customer.pin_set", "customer", customer.username);
+            return { username: customer.username, has_pin: true };
+        }
+        if (parts.length === 3 && parts[0] === "customers" && parts[2] === "reset-pin" && method === "POST") {
+            requireAdmin(init);
+            const customer = findCustomer(decodeURIComponent(parts[1]));
+            if (!customer) throw new ApiError(HTTP.NOT_FOUND, "Customer not found");
+            if (customer.pin) {
+                if (pendingOrdersFor(customer.id).length) {
+                    throw new ApiError(HTTP.CONFLICT, "The customer has unpaid orders. Settle the balance before resetting the PIN.");
+                }
+                customer.pin = null;
+                customer.pinFailed = 0;
+                customer.pinLockedUntil = null;
+                audit(actorOf(init), "customer.pin_reset", "customer", customer.username);
+            }
+            return { username: customer.username, has_pin: false };
         }
         if (parts.length === 3 && parts[0] === "customers" && parts[2] === "reset-payment" && method === "POST") {
             requireAdmin(init);

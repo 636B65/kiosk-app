@@ -2,6 +2,39 @@
 
 All notable changes to the Kiosk App are documented in this file.
 
+## [1.0.37] - 2026-10-27
+
+### Added
+- **Optional customer PIN** (4–8 digits), set or changed from the kiosk user lookup. With a
+  PIN, buying on the tab, looking up the balance/history and self-marking it paid all ask
+  for the PIN. Stored only as Argon2id (64 MiB, 3 passes, 4 lanes, random salt) over
+  HMAC-SHA256 with a 256-bit pepper kept outside the database (`data/pin_pepper.key`, or
+  the `PIN_PEPPER` env var), so neither staff nor a copy of the database or its backups
+  reveals a PIN. Five wrong PINs lock the account for 15 minutes. Staff can remove a
+  forgotten PIN ("Reset PIN" on Customers), but only after the balance is paid. An admin
+  token left in a kiosk browser does not bypass the PIN. All PIN events are audited.
+- **Self-scanning setting** (`kiosk_barcode_scanning`): the kiosk's "Scan barcode" field is
+  now opt-in and **off by default**, also on existing installations. Turn it on under
+  Settings.
+- The cursor goes straight to the username field after Buy and User lookup (and to the
+  PIN field when one is needed); **Esc** closes the open dialog (order confirmation,
+  lookup, ...) or the cart.
+
+### Fixed
+- "User lookup" no longer also opens the cart behind the lookup dialog.
+
+### Upgrade notes
+- Back up `data/pin_pepper.key` together with the database. Without it, stored PINs no
+  longer match and staff have to reset them.
+- New dependency: `argon2-cffi` 25.1.0.
+
+### Tests
+- Backend: 74 tests (new: peppered Argon2id storage, PIN on lookup/order/self-payment,
+  lockout and unlock, change needs the current PIN, admin reset only when paid, barcode
+  setting default). E2E: 47 steps (focus, Esc, set PIN, PIN on lookup and checkout incl.
+  a wrong PIN, admin reset after payment, self-scanning off by default) on Node 24.22.1.
+  Ruff, mypy and JavaScript syntax pass.
+
 ## [1.0.36] - 2026-10-25
 
 ### Security

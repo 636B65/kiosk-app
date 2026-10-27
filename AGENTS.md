@@ -56,6 +56,7 @@ backend/
   migrations.py    idempotent SQLite ALTER TABLE-style migrations + ADDED_COLUMNS (all dialects), run at startup
   seed.py          admin user (ADMIN_PASSWORD or random) + demo categories/products/settings
   audit.py         audit.record(db, actor, action, ...) helper (no commit; caller commits)
+  pins.py          customer PINs: Argon2id over HMAC-SHA256(pepper, pin); pepper outside the DB
   backups.py       SQLite VACUUM INTO backups, pruning, BackupScheduler thread
   security.py      bcrypt + JWT auth, OAuth2 bearer
   timeutil.py      utcnow()        # naive UTC. NEVER use datetime.utcnow()
@@ -152,6 +153,22 @@ tests/e2e/
   products by quantity over non-cancelled orders); the lookup shows them as one-tap
   add-to-cart buttons.
 - **Stock**: decremented at order creation; never negative (400 if insufficient).
+- **Customer PINs (optional)**: a customer sets a 4-8 digit PIN from the kiosk lookup
+  (`POST /api/customers/{username}/pin`; changing it needs `current_pin`). Stored only as
+  `Argon2id(HMAC-SHA256(pepper, pin))` (`pins.py`, explicit params m=64 MiB, t=3, p=4).
+  The pepper is `PIN_PEPPER` (>= 32 chars) or `pin_pepper.key` (0600) next to the database,
+  never in the DB or the app's backups (gitignored; back it up separately - without it
+  every PIN stops matching). With a PIN, `POST /api/orders` needs `customer_pin`, and the
+  lookup and self-mark-paid need the `X-Customer-PIN` header: 428 = PIN required,
+  403 "Wrong PIN", 429 after 5 wrong PINs (locked 15 min, counters in the `customers` row,
+  `customer.pin_locked` audit). An admin token never bypasses the order PIN; the lookup
+  skips it only with `?as_admin=true` plus a valid admin token (the admin panel's history).
+  Admins can only remove a PIN (`POST /api/customers/{username}/reset-pin`), and only when
+  no orders are pending (409 otherwise). `customers.has_pin` is exposed in `CustomerOut`.
+- **Self-scanning**: setting `kiosk_barcode_scanning` (default `"false"`) shows the kiosk's
+  "Scan barcode" field; the barcode lookup endpoint itself stays public.
+- **Kiosk focus/Esc**: Buy and User lookup put the cursor in the username field (then the
+  PIN field when one is asked for); Esc closes the open dialog, else the cart.
 - **Customer usernames**: stored lowercase and NFC-normalized (`normalize_username`). New
   ones (`validate_new_username`, on first purchase) are at most 64 characters with no
   control/format characters (422 otherwise); existing customers are not re-validated.
@@ -218,6 +235,7 @@ tests/e2e/
 | `SECRET_KEY` | JWT signing key; if unset a random one is generated per process (tokens invalidate on restart) — never ship a hardcoded key |
 | `ADMIN_PASSWORD` | Seed password for `admin`; **min 8 chars**, else ignored and a random one is generated + printed at first boot |
 | `CORS_ORIGINS` | Comma-separated allowed origins (defaults to localhost/https+s hosts) |
+| `PIN_PEPPER` | Secret (>= 32 chars) for customer PIN hashes; if unset, `pin_pepper.key` is created next to the DB. Changing/losing it invalidates every PIN |
 | `KIOSK_TEST_DB` | pytest + e2e write their SQLite test DB wherever this points |
 | `E2E_PYTHON` | Python used by the e2e harness to launch the backend |
 | `CHROMIUM_PATH` | System Chromium/Chrome binary used by Playwright tests |
@@ -261,8 +279,8 @@ a token without those scopes gets HTTP 401/403 from the Packages API.
   `ADMIN_PASSWORD=test-admin-password` and use an `admin_headers` fixture for protected calls.
   Order matters — keep tests in the file consistent with the shared DB.
 - e2e gotchas discovered the hard way:
-  - The lookup trigger (`#lookup-btn`) also has class `cart-btn`, so Playwright's doubled
-    `click()` opens the cart overlay — start failure-prone steps with a fresh `page.goto`.
+  - The lookup trigger (`#lookup-btn`) also has class `cart-btn` for styling; the cart
+    click handler excludes it (it used to open the cart behind the lookup dialog).
   - The kiosk cart persists in `localStorage["kiosk_cart"]` across page loads; a failed/blocked
     checkout leaves items in the cart (add buttons become qty controls). Clear the key +
     reload when a prior step intentionally left the cart populated.
@@ -274,8 +292,10 @@ a token without those scopes gets HTTP 401/403 from the Packages API.
   - `hasText` is a case-insensitive substring match ("Cola" matches "Chocolate Bar");
     use the `productRow(name)` helper for admin product rows.
   - Set `E2E_FAIL_SHOTS=<dir>` to save a screenshot (and log the URL) for each failed step.
-  - The backup step writes `backups/` next to the e2e DB; the harness removes it at the
-    end if the run created it (`backups/` is also gitignored).
+  - The backup step writes `backups/` next to the e2e DB, and the PIN steps create
+    `pin_pepper.key` there; the harness removes both at the end if the run created them
+    (both are also gitignored).
+  - API errors carry `err.status` (`api.js`); the kiosk PIN flow branches on 428/403/429.
 - Local Python is frequently newer than 3.12; the pinned `requirements.txt` wheels may lack
   compatibility → install first `fastapi pydantic sqlalchemy uvicorn python-multipart
   pyjwt bcrypt pytest ruff mypy` as latest (loose) when developing locally, but never change

@@ -50,6 +50,11 @@ ADDED_COLUMNS = {
     "order_items": {
         "unit_cost": "FLOAT",
     },
+    "customers": {
+        "pin_hash": "VARCHAR",
+        "pin_failed_attempts": "INTEGER DEFAULT 0",
+        "pin_locked_until": "TIMESTAMP",
+    },
 }
 
 
