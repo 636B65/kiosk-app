@@ -13,3 +13,4 @@ node_modules/
 .pytest_cache/
 backups/
 backend/release.json
+pin_pepper.key

@@ -8,7 +8,7 @@ import audit
 from database import get_db
 from due_dates import get_due_date
 from models import Customer, Order, OrderItem, Product, User
-from routers.customers import normalize_username, validate_new_username
+from routers.customers import check_customer_pin, normalize_username, validate_new_username
 from schemas import OrderCreate, OrderItemOut, OrderOut
 from security import get_current_user
 from timeutil import utcnow
@@ -59,6 +59,18 @@ def get_order_items(
 def create_order(data: OrderCreate, db: Session = Depends(get_db)):
     if not data.items:
         raise HTTPException(status_code=400, detail="Order must contain items")
+
+    # PIN check before the order transaction, so failed attempts are committed
+    # (and count toward the lockout) even though the order is rejected. An admin
+    # token never bypasses it: the kiosk is a customer-facing device.
+    existing = (
+        db.query(Customer)
+        .filter(Customer.username == normalize_username(data.customer_username))
+        .first()
+    )
+    if existing is not None:
+        check_customer_pin(db, existing, data.customer_pin)
+    db.commit()
 
     with db.begin():
         customer = get_or_create_customer(db, data.customer_username)

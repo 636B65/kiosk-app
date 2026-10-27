@@ -181,6 +181,8 @@ class OrderCreate(BaseModel):
     customer_username: str
     items: List[OrderItemIn]
     notes: str = ""
+    # Required (and checked) only when the customer has set a PIN.
+    customer_pin: Optional[str] = Field(default=None, max_length=16)
 
     @field_validator("items")
     @classmethod
@@ -231,6 +233,7 @@ class CustomerOut(BaseModel):
     id: int
     username: str
     created_at: Optional[datetime] = None
+    has_pin: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -290,6 +293,11 @@ class CustomerHistoryOut(BaseModel):
     orders: List[OrderDetailOut] = []
     stats: CustomerStats
     favorites: List[FavoriteOut] = []
+
+
+class PinChangeIn(BaseModel):
+    pin: str = Field(max_length=16)
+    current_pin: Optional[str] = Field(default=None, max_length=16)
 
 
 class SettingIn(BaseModel):

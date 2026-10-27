@@ -12,6 +12,14 @@ const Actions = {
             const fn = this.handlers[el.dataset.action];
             if (fn) fn(el, e);
         });
+        document.addEventListener("keydown", (e) => {
+            if (e.key !== "Escape" || document.getElementById("idle-warning")) return;
+            if (document.getElementById("modal-overlay")) {
+                Modal.close();
+            } else {
+                document.getElementById("cart-overlay")?.remove();
+            }
+        });
         document.addEventListener("input", (e) => {
             if (!e.target.matches("[data-action-input]")) return;
             const fn = this.handlers[e.target.dataset.actionInput];
@@ -43,6 +51,16 @@ Actions.register("kiosk-search", () => Kiosk.renderProductGrid());
 Actions.register("kiosk-idle-continue", () => Kiosk.noteActivity());
 Actions.register("kiosk-buy-again", (el) => Kiosk.buyAgain(parseInt(el.dataset.id)));
 Actions.register("kiosk-open-cart", () => Kiosk.openCartFromModal());
+Actions.register("kiosk-forgot-pin", (el) => {
+    const help = el.parentElement.querySelector(".pin-forgot-help");
+    if (help) help.hidden = false;
+});
+Actions.register("kiosk-pin-setup", (el) =>
+    Kiosk.openPinSetup(decodeURIComponent(el.dataset.username), el.dataset.hasPin === "true")
+);
+Actions.register("admin-reset-pin", (el) =>
+    Admin.confirmResetPin(decodeURIComponent(el.dataset.username))
+);
 
 Actions.register("admin-restock", (el) => Admin.openRestockModal(parseInt(el.dataset.id)));
 Actions.register("admin-margins-period", (el) => Admin.renderMargins(el.dataset.period));

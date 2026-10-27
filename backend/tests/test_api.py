@@ -1504,6 +1504,7 @@ PUBLIC_ENDPOINTS = {
     ("GET", "/api/customers/suggest"),
     ("GET", "/api/customers/{username}"),
     ("POST", "/api/customers/{username}/self-mark-paid"),
+    ("POST", "/api/customers/{username}/pin"),
 }
 
 
@@ -1625,3 +1626,180 @@ def test_product_prices_cannot_be_negative(client, admin_headers):
             "/api/products", json={"name": "Negative", field: -1}, headers=admin_headers
         )
         assert r.status_code == 422, field
+
+
+# --------------------------------------------------------------------------- #
+# Customer PINs and kiosk settings
+# --------------------------------------------------------------------------- #
+def test_barcode_scanning_is_off_by_default(client):
+    assert client.get("/api/settings").json()["kiosk_barcode_scanning"] == "false"
+
+
+def _pin_customer(client, products, name):
+    item = [{"product_id": products[6]["id"], "quantity": 1}]
+    r = client.post("/api/orders", json={"customer_username": name, "items": item})
+    assert r.status_code == 201, r.text
+    return item
+
+
+def test_pin_is_stored_as_peppered_argon2id(client, products):
+    import stat
+
+    import pins
+    from argon2 import PasswordHasher
+    from database import SessionLocal
+    from models import Customer
+
+    _pin_customer(client, products, "pin_storage")
+    for bad in ("123", "123456789", "12a4", "", " 1234"):
+        r = client.post("/api/customers/pin_storage/pin", json={"pin": bad})
+        assert r.status_code == 422, bad
+    assert client.post("/api/customers/pin_storage/pin", json={"pin": "4821"}).json() == {
+        "username": "pin_storage",
+        "has_pin": True,
+    }
+
+    db = SessionLocal()
+    try:
+        stored = db.query(Customer).filter_by(username="pin_storage").one().pin_hash
+    finally:
+        db.close()
+    assert stored.startswith("$argon2id$v=19$m=65536,t=3,p=4$")
+    assert "4821" not in stored
+    # The hash is over HMAC(pepper, pin), so the database alone is not enough:
+    # hashing guesses without the pepper never matches.
+    try:
+        PasswordHasher().verify(stored, "4821")
+        raise AssertionError("PIN verified without the pepper")
+    except Exception as exc:
+        assert type(exc).__name__ == "VerifyMismatchError"
+    assert pins.verify_pin(stored, "4821")
+    assert not pins.verify_pin(stored, "4822")
+    key = Path(pins.pepper_path())
+    assert key.exists() and stat.S_IMODE(key.stat().st_mode) == 0o600
+    # Backups copy only the database, never the pepper.
+    assert key.name == "pin_pepper.key"
+
+
+def test_pin_protects_lookup_orders_and_self_payment(client, products, admin_headers):
+    item = _pin_customer(client, products, "pin_guarded")
+    client.post("/api/customers/pin_guarded/pin", json={"pin": "246810"})
+
+    r = client.get("/api/customers/pin_guarded")
+    assert (r.status_code, r.json()["detail"]) == (428, "PIN required")
+    r = client.get("/api/customers/pin_guarded", headers={"X-Customer-PIN": "111111"})
+    assert (r.status_code, r.json()["detail"]) == (403, "Wrong PIN")
+    r = client.get("/api/customers/pin_guarded", headers={"X-Customer-PIN": "246810"})
+    assert r.status_code == 200
+    assert r.json()["customer"]["has_pin"] is True
+    # Suggestions still only reveal the username.
+    assert client.get("/api/customers/suggest?q=pin_gu").json() == ["pin_guarded"]
+
+    order = {"customer_username": "pin_guarded", "items": item}
+    assert client.post("/api/orders", json=order).status_code == 428
+    assert client.post("/api/orders", json={**order, "customer_pin": "000000"}).status_code == 403
+    assert client.post("/api/orders", json={**order, "customer_pin": "246810"}).status_code == 201
+    # An admin token never unlocks the kiosk order flow ...
+    assert client.post("/api/orders", json=order, headers=admin_headers).status_code == 428
+    # ... and unlocks a lookup only when the admin panel asks explicitly.
+    assert client.get("/api/customers/pin_guarded", headers=admin_headers).status_code == 428
+    assert client.get(
+        "/api/customers/pin_guarded?as_admin=true", headers=admin_headers
+    ).status_code == 200
+    assert client.get("/api/customers/pin_guarded?as_admin=true").status_code == 428
+    listing = {c["username"]: c for c in client.get("/api/customers", headers=admin_headers).json()}
+    assert listing["pin_guarded"]["has_pin"] is True
+
+    client.put(
+        "/api/settings/customer_self_service_payment",
+        json={"key": "customer_self_service_payment", "value": "true"},
+        headers=admin_headers,
+    )
+    try:
+        assert client.post("/api/customers/pin_guarded/self-mark-paid").status_code == 428
+        r = client.post(
+            "/api/customers/pin_guarded/self-mark-paid", headers={"X-Customer-PIN": "246810"}
+        )
+        assert r.status_code == 200 and r.json()["settled"] == 2  # first buy + PIN order
+    finally:
+        client.put(
+            "/api/settings/customer_self_service_payment",
+            json={"key": "customer_self_service_payment", "value": "false"},
+            headers=admin_headers,
+        )
+
+
+def test_wrong_pins_lock_the_customer(client, products, admin_headers):
+    from datetime import timedelta
+
+    from database import SessionLocal
+    from models import Customer
+    from timeutil import utcnow
+
+    _pin_customer(client, products, "pin_locker")
+    client.post("/api/customers/pin_locker/pin", json={"pin": "1357"})
+    wrong = {"X-Customer-PIN": "9999"}
+    right = {"X-Customer-PIN": "1357"}
+
+    # A correct PIN in between resets the counter.
+    for _ in range(4):
+        assert client.get("/api/customers/pin_locker", headers=wrong).status_code == 403
+    assert client.get("/api/customers/pin_locker", headers=right).status_code == 200
+    for _ in range(4):
+        assert client.get("/api/customers/pin_locker", headers=wrong).status_code == 403
+    assert client.get("/api/customers/pin_locker", headers=wrong).status_code == 403  # 5th
+    r = client.get("/api/customers/pin_locker", headers=right)
+    assert r.status_code == 429 and "Try again" in r.json()["detail"]
+    assert client.post(
+        "/api/orders",
+        json={"customer_username": "pin_locker", "items": [{"product_id": products[6]["id"], "quantity": 1}],
+              "customer_pin": "1357"},
+    ).status_code == 429
+    entry = client.get("/api/audit?action=customer.pin_locked", headers=admin_headers).json()[0]
+    assert entry["entity_id"] == "pin_locker"
+
+    db = SessionLocal()
+    try:
+        customer = db.query(Customer).filter_by(username="pin_locker").one()
+        customer.pin_locked_until = utcnow() - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
+    assert client.get("/api/customers/pin_locker", headers=right).status_code == 200
+
+
+def test_changing_a_pin_requires_the_current_one(client, products):
+    _pin_customer(client, products, "pin_changer")
+    assert client.post("/api/customers/pin_changer/pin", json={"pin": "5555"}).status_code == 200
+    assert client.post("/api/customers/pin_changer/pin", json={"pin": "6666"}).status_code == 428
+    assert client.post(
+        "/api/customers/pin_changer/pin", json={"pin": "6666", "current_pin": "1111"}
+    ).status_code == 403
+    assert client.post(
+        "/api/customers/pin_changer/pin", json={"pin": "6666", "current_pin": "5555"}
+    ).status_code == 200
+    assert client.get("/api/customers/pin_changer", headers={"X-Customer-PIN": "5555"}).status_code == 403
+    assert client.get("/api/customers/pin_changer", headers={"X-Customer-PIN": "6666"}).status_code == 200
+    assert client.post("/api/customers/nobody_here/pin", json={"pin": "1234"}).status_code == 404
+
+
+def test_admin_resets_a_pin_only_when_nothing_is_owed(client, products, admin_headers):
+    item = _pin_customer(client, products, "pin_forgetter")  # leaves a pending order
+    client.post("/api/customers/pin_forgetter/pin", json={"pin": "8080"})
+
+    assert client.post("/api/customers/pin_forgetter/reset-pin").status_code == 401
+    r = client.post("/api/customers/pin_forgetter/reset-pin", headers=admin_headers)
+    assert r.status_code == 409 and "unpaid" in r.json()["detail"]
+    assert client.get("/api/customers/pin_forgetter").status_code == 428
+
+    client.post("/api/customers/pin_forgetter/reset-payment", headers=admin_headers)
+    r = client.post("/api/customers/pin_forgetter/reset-pin", headers=admin_headers)
+    assert r.json() == {"username": "pin_forgetter", "has_pin": False}
+    lookup = client.get("/api/customers/pin_forgetter")
+    assert lookup.status_code == 200 and lookup.json()["customer"]["has_pin"] is False
+    assert client.post(
+        "/api/orders", json={"customer_username": "pin_forgetter", "items": item}
+    ).status_code == 201
+
+    actions = [e["action"] for e in client.get("/api/audit?action=customer.pin", headers=admin_headers).json()]
+    assert "customer.pin_reset" in actions and "customer.pin_set" in actions

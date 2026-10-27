@@ -19,6 +19,9 @@ try { fs.unlinkSync(DB); } catch {}
 // "Back up now" writes next to the database; remove what this run created.
 const BACKUP_DIR = path.join(path.dirname(DB), "backups");
 const backupDirExisted = fs.existsSync(BACKUP_DIR);
+// The PIN pepper (backend/pins.py) is created next to the database on first use.
+const PIN_PEPPER = path.join(path.dirname(DB), "pin_pepper.key");
+const pinPepperExisted = fs.existsSync(PIN_PEPPER);
 
 const backend = spawn(
   PYTHON,
@@ -218,9 +221,11 @@ server.listen(PORT, async () => {
     await step("customer: buy requires username", async () => {
       await page.locator(".checkout-btn").click();
       await page.waitForSelector("#checkout-form");
-      const label = await page.locator("#checkout-form label").textContent();
+      const label = await page.locator("#checkout-form label").first().textContent();
       if (!label.includes("Username")) throw new Error("no username prompt");
-      return "username prompt shown";
+      const focused = await page.evaluate(() => document.activeElement?.id);
+      if (focused !== "co-username") throw new Error("cursor not in the username field: " + focused);
+      return "username prompt shown with the cursor in it";
     });
 
     await step("customer: checkout creates new user", async () => {
@@ -430,24 +435,36 @@ server.listen(PORT, async () => {
       return "two barcodes saved";
     });
 
-    await step("customer: scan either barcode to add product to cart", async () => {
+    await step("customer: self-scanning is off by default", async () => {
       await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
-      await page.waitForSelector("#barcode-input");
-      const input = page.locator("#barcode-input");
-      await input.fill("0123456789012");
-      await input.press("Enter");
-      await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "1");
-      await input.fill("USB-C-ALT");
-      await input.press("Enter");
-      await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "2");
-      await page.locator(".cart-btn", { hasText: "Cart" }).click();
-      await page.waitForSelector("#cart-overlay");
-      const cart = await page.locator("#cart-overlay").textContent();
-      if (!cart.includes("USB-C Cable") || !cart.includes("× 2")) {
-        throw new Error("barcode scans did not add the same item twice: " + cart);
+      await page.waitForSelector(".product-card");
+      if (await page.locator("#barcode-input").count()) throw new Error("scan field shown although scanning is off");
+      return "no scan field until an admin enables it";
+    });
+
+    await step("customer: scan either barcode to add product to cart", async () => {
+      await setSetting("kiosk_barcode_scanning", "true");
+      try {
+        await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+        await page.waitForSelector("#barcode-input");
+        const input = page.locator("#barcode-input");
+        await input.fill("0123456789012");
+        await input.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "1");
+        await input.fill("USB-C-ALT");
+        await input.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#cart-count")?.textContent === "2");
+        await page.locator(".cart-btn", { hasText: "Cart" }).click();
+        await page.waitForSelector("#cart-overlay");
+        const cart = await page.locator("#cart-overlay").textContent();
+        if (!cart.includes("USB-C Cable") || !cart.includes("× 2")) {
+          throw new Error("barcode scans did not add the same item twice: " + cart);
+        }
+        await page.locator("#cart-overlay .cart-close").click();
+        await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
+      } finally {
+        await setSetting("kiosk_barcode_scanning", "false");
       }
-      await page.locator("#cart-overlay .cart-close").click();
-      await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
       return "both codes added USB-C Cable to cart";
     });
 
@@ -816,7 +833,106 @@ server.listen(PORT, async () => {
         ["#s-kiosk_idle_seconds", "#s-backup_interval_hours", "#s-backup_keep"].map((s) => page.inputValue(s))
       );
       if (values.join(",") !== "90,24,7") throw new Error("unexpected defaults: " + values.join(","));
-      return "idle 90 s, backup every 24 h, keep 7";
+      if (await page.isChecked("#s-kiosk_barcode_scanning")) throw new Error("self-scanning should be off by default");
+      return "idle 90 s, backup every 24 h, keep 7, self-scanning off";
+    });
+
+    // ---- 1.1.0: focus, Esc, customer PINs ----
+    const activeId = () => page.evaluate(() => document.activeElement?.id || "");
+    const buyFirstProduct = async (username) => {
+      await page.locator(".product-card .add-btn").first().click();
+      await page.locator(".cart-btn", { hasText: "Cart" }).click();
+      await page.waitForSelector("#cart-overlay");
+      await page.locator(".checkout-btn").click();
+      await page.waitForSelector("#checkout-form");
+      if ((await activeId()) !== "co-username") throw new Error("cursor not in the username field");
+      await page.keyboard.type(username);
+      await page.keyboard.press("Enter");
+    };
+
+    await step("customer: lookup puts the cursor in the username field; Esc closes it", async () => {
+      await freshKiosk();
+      await page.locator("#lookup-btn").click();
+      await page.waitForSelector("#lookup-form");
+      if ((await activeId()) !== "lk-username") throw new Error("cursor not in the lookup field");
+      if (await page.locator("#cart-overlay").count()) throw new Error("User lookup also opened the cart");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#modal-overlay", { state: "detached" });
+      return "focused; no cart behind it; Esc closed the dialog";
+    });
+
+    await step("customer: Esc closes the order confirmation", async () => {
+      await buyFirstProduct("pin_e2e");
+      await page.waitForFunction(() => (document.querySelector("#modal-overlay")?.textContent || "").includes("Order #"));
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#modal-overlay", { state: "detached" });
+      return "confirmation closed with Esc";
+    });
+
+    await step("customer: sets a PIN from the lookup", async () => {
+      await page.evaluate(() => Kiosk.openLookup());
+      await page.keyboard.type("pin_e2e");
+      await page.keyboard.press("Enter");
+      await page.locator('[data-action="kiosk-pin-setup"]', { hasText: "Set a PIN" }).click();
+      await page.waitForSelector("#pin-form");
+      if ((await activeId()) !== "pin-new") throw new Error("cursor not in the PIN field");
+      await page.fill("#pin-new", "4826");
+      await page.fill("#pin-repeat", "4826");
+      await page.locator("#pin-form button[type=submit]").click();
+      await page.waitForSelector('[data-action="kiosk-pin-setup"]:has-text("Change PIN")', { timeout: 7000 });
+      await page.keyboard.press("Escape");
+      return "PIN set; lookup now offers Change PIN";
+    });
+
+    await step("customer: a PIN is required to look up and to buy", async () => {
+      await page.evaluate(() => Kiosk.openLookup());
+      await page.keyboard.type("pin_e2e");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("#lk-pin-group:not([hidden])");
+      if ((await activeId()) !== "lk-pin") throw new Error("cursor not in the lookup PIN field");
+      await page.locator('#lk-pin-group [data-action="kiosk-forgot-pin"]').click();
+      const help = await page.locator("#lk-pin-group .pin-forgot-help").textContent();
+      if (!help.includes("Pay your outstanding balance") || !help.includes("tell the staff")) {
+        throw new Error("forgot-PIN help missing: " + help);
+      }
+      await page.locator("#lk-pin").focus();
+      await page.keyboard.type("1111");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector(".toast.error >> text=Wrong PIN", { timeout: 5000 });
+      await page.fill("#lk-pin", "4826");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector(".balance-big", { timeout: 7000 });
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#modal-overlay", { state: "detached" });
+
+      await buyFirstProduct("pin_e2e");
+      await page.waitForSelector("#co-pin-group:not([hidden])", { timeout: 7000 });
+      if ((await activeId()) !== "co-pin") throw new Error("cursor not in the checkout PIN field");
+      await page.keyboard.type("4826");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => (document.querySelector("#modal-overlay")?.textContent || "").includes("Order #"));
+      await page.keyboard.press("Escape");
+      return "lookup and checkout asked for the PIN; wrong PIN rejected";
+    });
+
+    await step("admin: PIN reset waits until the balance is paid", async () => {
+      await adminView("customers", "#admin-main-container table");
+      const row = () => page.locator("tbody tr").filter({ has: page.locator("td:first-child", { hasText: /^\s*pin_e2e/ }) });
+      if (!(await row().textContent()).includes("PIN")) throw new Error("no PIN badge");
+      if (!(await row().locator('[data-action="admin-reset-pin"]').isDisabled())) throw new Error("reset allowed with unpaid balance");
+      await row().locator(".reset-payment").click();
+      await page.locator("#confirm-reset").click();
+      await page.waitForFunction(() => {
+        const btn = [...document.querySelectorAll('[data-action="admin-reset-pin"]')]
+          .find((b) => b.closest("tr")?.textContent.includes("pin_e2e"));
+        return btn && !btn.disabled;
+      }, undefined, { timeout: 7000 });
+      await row().locator('[data-action="admin-reset-pin"]').click();
+      await page.locator("#confirm-reset-pin").click();
+      await page.waitForSelector(".toast.success >> text=PIN removed for pin_e2e", { timeout: 5000 });
+      await page.waitForFunction(() => ![...document.querySelectorAll("tbody tr")]
+        .some((tr) => tr.textContent.includes("pin_e2e") && tr.textContent.includes("🔒")));
+      return "reset blocked while unpaid, allowed after payment";
     });
   } catch (e) {
     results.push("FAIL  outer — " + e.message);
@@ -824,6 +940,7 @@ server.listen(PORT, async () => {
 
   await browser.close();
   if (!backupDirExisted) fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
+  if (!pinPepperExisted) fs.rmSync(PIN_PEPPER, { force: true });
   server.close();
   backend.kill("SIGTERM");
   console.log("\n" + results.join("\n"));
@@ -834,6 +951,9 @@ server.listen(PORT, async () => {
   const expectedErrors = [
     /status of 403 .*\/api\/orders\]$/,
     /status of 404 .*\/api\/customers\/ghost_user_x\]$/,
+    // PIN steps: "PIN required" (428) and the deliberate wrong PIN (403).
+    /status of 428 .*\/api\/(orders|customers\/pin_e2e)\]$/,
+    /status of 403 .*\/api\/customers\/pin_e2e\]$/,
   ];
   const unexpected = errors.filter((e) => !expectedErrors.some((re) => re.test(e)));
   if (unexpected.length) {

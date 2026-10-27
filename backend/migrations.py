@@ -37,9 +37,8 @@ def _drop_column(conn, table: str, column: str):
     conn.execute(text(f"DROP TABLE {table}__old"))
 
 
-# Columns added after tables already existed in deployed databases. Plain
-# ADD COLUMN DDL that SQLite and PostgreSQL both accept; create_all() only
-# creates missing tables, so every dialect runs this at startup.
+# Columns added after tables already existed in deployed databases.
+# create_all() only creates missing tables, so migrate() adds these.
 ADDED_COLUMNS = {
     "products": {
         "special_starts_on": "DATE",
@@ -50,11 +49,16 @@ ADDED_COLUMNS = {
     "order_items": {
         "unit_cost": "FLOAT",
     },
+    "customers": {
+        "pin_hash": "VARCHAR",
+        "pin_failed_attempts": "INTEGER DEFAULT 0",
+        "pin_locked_until": "TIMESTAMP",
+    },
 }
 
 
 def add_missing_columns(engine: Engine) -> None:
-    """Add newer nullable/defaulted columns to existing tables (any dialect)."""
+    """Add newer nullable/defaulted columns to existing tables."""
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     with engine.begin() as conn:

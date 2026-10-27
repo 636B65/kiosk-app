@@ -48,6 +48,7 @@ def seed(db: Session):
         "currency": "EUR",
         "payment_due_date": "",
         "kiosk_idle_seconds": "90",
+        "kiosk_barcode_scanning": "false",
         "backup_interval_hours": "24",
         "backup_keep": "7",
     }.items():

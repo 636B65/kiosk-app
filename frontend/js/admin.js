@@ -752,7 +752,7 @@ const Admin = {
                             ? '<tr><td colspan="8">No customers yet</td></tr>'
                             : customers.map((c) => `
                             <tr>
-                                <td><strong>${esc(c.username)}</strong></td>
+                                <td><strong>${esc(c.username)}</strong>${c.has_pin ? ' <span class="pin-badge" title="Protected with a PIN">🔒 PIN</span>' : ""}</td>
                                 <td>${new Date(c.created_at).toLocaleDateString()}</td>
                                 <td>${c.order_count}</td>
                                 <td>${c.stats.avg_orders_per_month}</td>
@@ -763,6 +763,11 @@ const Admin = {
                                     <button class="btn btn-secondary view-customer" data-username="${encodeURIComponent(c.username)}">History</button>
                                     ${c.balance > 0 ? `
                                         <button class="btn btn-success reset-payment" data-username="${encodeURIComponent(c.username)}">Reset payment</button>
+                                    ` : ""}
+                                    ${c.has_pin ? `
+                                        <button class="btn btn-secondary" data-action="admin-reset-pin"
+                                                data-username="${encodeURIComponent(c.username)}"
+                                                ${c.balance > 0 ? 'disabled title="Settle the balance before resetting the PIN"' : ""}>Reset PIN</button>
                                     ` : ""}
                                 </td>
                             </tr>
@@ -776,7 +781,7 @@ const Admin = {
 
     async viewCustomer(username) {
         try {
-            const data = await API.get(`/customers/${encodeURIComponent(username)}`);
+            const data = await API.get(`/customers/${encodeURIComponent(username)}?as_admin=true`);
             const orderBlock = (o) => `
                 <div class="history-order">
                     <div class="history-order-head">
@@ -836,6 +841,28 @@ const Admin = {
         } catch (err) {
             Toast.error(err.message);
         }
+    },
+
+    confirmResetPin(username) {
+        Modal.open(`
+            <h2>Reset PIN</h2>
+            <p>Remove the PIN for <strong>${esc(username)}</strong>? The customer can then buy and
+               look up without a PIN until they set a new one. Nobody can see the old PIN.</p>
+            <div class="form-actions">
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                <button class="btn btn-danger" id="confirm-reset-pin">Reset PIN</button>
+            </div>
+        `);
+        document.getElementById("confirm-reset-pin").addEventListener("click", async () => {
+            try {
+                await API.post(`/customers/${encodeURIComponent(username)}/reset-pin`, {});
+                Modal.close();
+                Toast.success(`PIN removed for ${username}`);
+                if (this.view === "customers") this.renderCustomers();
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
     },
 
     confirmResetPayment(username) {
@@ -1101,9 +1128,7 @@ const Admin = {
         const short = (c) => (c ? String(c).slice(0, 7) : "—");
         const released = (v) => /^\d/.test(v || "");
         const mismatch = released(front.version) && released(status.version) && status.version !== front.version;
-        const noBackupHint = status.database.engine === "postgresql"
-            ? "This installation uses PostgreSQL. Back it up with <code>pg_dump</code>."
-            : `Backups are not available for this database (${esc(status.database.engine)}).`;
+        const noBackupHint = `Backups are not available for this database (${esc(status.database.engine)}).`;
         const b = status.backups;
         const backupAge = b.last_backup_at ? (Date.now() - new Date(b.last_backup_at).getTime()) / 3600000 : null;
         const backupStale = b.supported && b.interval_hours > 0 && (backupAge == null || backupAge > b.interval_hours * 2);
@@ -1122,7 +1147,7 @@ const Admin = {
                     <div class="stat-card">
                         <div class="label">Last backup</div>
                         <div class="value" style="${backupStale ? "color:var(--danger);" : ""}">${b.last_backup_at ? new Date(b.last_backup_at).toLocaleString() : (b.supported ? "Never" : "n/a")}</div>
-                        <div class="sub">${b.supported ? `${b.count} kept · ${fmtBytes(b.total_bytes)}` : (status.database.engine === "postgresql" ? "PostgreSQL: use pg_dump" : "not available")}</div>
+                        <div class="sub">${b.supported ? `${b.count} kept · ${fmtBytes(b.total_bytes)}` : "not available"}</div>
                     </div>
                 </div>
                 <div class="stats-grid">
@@ -1355,6 +1380,16 @@ const Admin = {
                         </div>
                     </div>
                     <div class="form-group" style="border-top:1px solid var(--border); padding-top:1rem;">
+                        <label style="display:flex; align-items:center; gap:0.5rem;">
+                            <input type="checkbox" id="s-kiosk_barcode_scanning"
+                                ${settings.kiosk_barcode_scanning === "true" ? "checked" : ""}>
+                            Let customers scan product barcodes at the kiosk (self-scanning)
+                        </label>
+                        <div style="font-size:0.8rem; color:var(--muted); margin-top:0.25rem;">
+                            Shows the "Scan barcode" field on the kiosk. Off by default.
+                        </div>
+                    </div>
+                    <div class="form-group">
                         <label for="s-kiosk_idle_seconds">Reset the kiosk after inactivity (seconds)</label>
                         <input id="s-kiosk_idle_seconds" type="number" min="0" step="1" value="${esc(settings.kiosk_idle_seconds ?? "90")}">
                         <div style="font-size:0.8rem; color:var(--muted); margin-top:0.25rem;">
@@ -1393,6 +1428,7 @@ const Admin = {
             debug_mode: document.getElementById("s-debug_mode").checked ? "true" : "false",
             payment_due_date: document.getElementById("s-payment_due_date").value.trim(),
             customer_self_service_payment: document.getElementById("s-customer_self_service_payment").checked ? "true" : "false",
+            kiosk_barcode_scanning: document.getElementById("s-kiosk_barcode_scanning").checked ? "true" : "false",
             kiosk_idle_seconds: String(Math.max(0, parseInt(document.getElementById("s-kiosk_idle_seconds").value) || 0)),
             backup_interval_hours: String(Math.max(0, parseInt(document.getElementById("s-backup_interval_hours").value) || 0)),
             backup_keep: String(Math.min(365, Math.max(1, parseInt(document.getElementById("s-backup_keep").value) || 7))),

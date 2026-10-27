@@ -5,9 +5,8 @@ panel. Customers browse products, put them in a cart, and buy on a credit/tab
 basis using a username. An admin user views sales, manages products, and tracks
 customer balances.
 
-The default deployment runs fully **offline (air-gapped)** via Docker Compose.
-An optional PostgreSQL + Redis high-traffic stack is also available; it is never
-enabled by default.
+The deployment runs fully **offline (air-gapped)** via Docker Compose: one
+FastAPI backend with a SQLite database behind an HTTPS nginx frontend.
 
 ## Live demo
 
@@ -38,6 +37,14 @@ sample data. Everything lives in your browser and **resets on reload**.
   start and end on given dates and switches itself on and off
 - "Buy again" in the user lookup: the customer's most-bought products as one-tap
   buttons that add straight to the cart
+- Optional PIN (4–8 digits) per customer, set from the user lookup: with a PIN nobody can
+  buy on the tab, see the balance or self-mark it paid without it. PINs are stored as
+  Argon2id over a peppered HMAC (the pepper lives in `data/pin_pepper.key`, outside the
+  database and its backups — keep a copy of that file), 5 wrong PINs lock the account for
+  15 minutes, and staff can only remove a forgotten PIN once the balance is paid
+- The cursor jumps to the username (and PIN) field on Buy and User lookup; Esc closes
+  dialogs
+- Self-scanning of product barcodes at the kiosk, off by default (Settings)
 - Idle reset: after a configurable time without a touch (default 90 s) the kiosk
   warns for 10 seconds, then clears the cart and closes open dialogs so the next
   customer never sees the previous one's cart or balance
@@ -69,8 +76,8 @@ sample data. Everything lives in your browser and **resets on reload**.
 
 ## Architecture
 
-The diagram compares the default single-host SQLite deployment with the
-optional PostgreSQL + Redis high-traffic mode.
+The kiosk runs as a single host: nginx serves the web app over HTTPS and proxies
+`/api` to one FastAPI backend, which stores everything in a SQLite file.
 
 ![Kiosk App system architecture](docs/kiosk-architecture.svg)
 
@@ -82,7 +89,7 @@ The editable source diagram is [available in draw.io format](docs/kiosk-architec
 
 | Layer     | Technology                                              |
 |-----------|---------------------------------------------------------|
-| Backend   | Python 3.12, FastAPI, SQLAlchemy, SQLite (default) or PostgreSQL, JWT auth |
+| Backend   | Python 3.12, FastAPI, SQLAlchemy, SQLite, JWT auth      |
 | Frontend  | Vanilla HTML/CSS/JS served by nginx                     |
 | Runtime   | Docker Compose (backend + nginx frontend)               |
 | Storage   | SQLite database file bound-mounted at `./data/kiosk.db`; product images
@@ -96,9 +103,7 @@ Requires Docker with the Compose plugin.
 docker compose up --build
 ```
 
-The same default mode is available through `./compose.sh`. Set
-`HIGH_TRAFFIC=1` for the optional stack; see
-[High-traffic mode](#high-traffic-mode) before switching a live installation.
+`./compose.sh` runs the same stack and stamps the build with `git describe`.
 The footer (and the admin System page) shows the running release and commit.
 A plain `docker compose up --build` takes them from the checkout: the newest
 `CHANGELOG.md` version and the checked-out git commit (no git needed in the
@@ -149,75 +154,11 @@ requests to it over Docker's internal network.
   `./data/backups/` every 24 hours (Settings: interval, `0` = off; how many to keep,
   default 7). The admin **System** page lists them, takes one on demand and
   downloads them. Backups cover the database only, not product images, and they
-  live on the same disk, so copy them elsewhere now and then. PostgreSQL
-  (high-traffic mode) is not backed up by the app; use `pg_dump`.
+  live on the same disk, so copy them elsewhere now and then.
+- **Keep `./data/pin_pepper.key`** together with the database: customer PINs are
+  hashed with this secret, and it is deliberately not part of the app's backups.
 - Back up the DB (and product images) before updates:
   `cp -r data data.bak`
-
-## High-traffic mode (optional)
-
-The normal `docker compose up` / `./compose.sh up` command remains the single
-SQLite + Nginx deployment. High-traffic mode is selected explicitly with
-`HIGH_TRAFFIC=1 ./compose.sh ...`; it adds PostgreSQL, Redis, an HTTPS Nginx load
-balancer, and internal Nginx/API services that can be scaled independently.
-Redis caches public product, category, and settings GET responses for 30
-seconds and invalidates them after successful write requests. PostgreSQL is the
-shared database for API replicas. Product images remain in the shared `data`
-volume.
-
-This mode requires Docker Compose v2.24 or newer and a `.env` file containing
-matching database credentials. URL-encode reserved characters in the password
-inside `DATABASE_URL`:
-
-```dotenv
-POSTGRES_PASSWORD=replace-with-a-strong-password
-DATABASE_URL=postgresql+psycopg://kiosk:replace-with-a-strong-password@postgres:5432/kiosk
-SECRET_KEY=replace-with-a-stable-random-signing-key
-```
-
-**Switching from the default SQLite mode:** first back up `data/` and stop the
-simple stack. Start only PostgreSQL and Redis, copy the SQLite contents to the
-empty PostgreSQL database, then start the scaled stack. The migration command
-refuses to overwrite a populated target unless `--replace-target` is explicitly
-provided.
-
-```bash
-cp -r data data.before-high-traffic
-./compose.sh down
-HIGH_TRAFFIC=1 ./compose.sh up -d postgres redis
-HIGH_TRAFFIC=1 ./compose.sh run --rm --no-deps backend \
-  python migrate_database.py \
-  --source sqlite:////app/data/kiosk.db \
-  --target "$DATABASE_URL"
-HIGH_TRAFFIC=1 ./compose.sh up -d --build --scale backend=3 --scale frontend=3
-```
-
-If `DATABASE_URL` is not exported in the shell, run the migration with the same
-URL value as the one in `.env`. The original SQLite file is retained as a
-pre-switch backup; after the copy, PostgreSQL is authoritative. Do not run
-SQLite and PostgreSQL deployments concurrently against the same store.
-
-**Switching back to SQLite:** stop all services that can accept writes, copy the
-latest PostgreSQL data back into the SQLite file (replacing its now-stale
-contents), then start the default stack. Back up both databases first.
-
-```bash
-cp -r data data.before-return-to-sqlite
-HIGH_TRAFFIC=1 ./compose.sh stop backend frontend loadbalancer
-HIGH_TRAFFIC=1 ./compose.sh run --rm --no-deps backend \
-  python migrate_database.py \
-  --source "$DATABASE_URL" \
-  --target sqlite:////app/data/kiosk.db \
-  --replace-target
-HIGH_TRAFFIC=1 ./compose.sh down
-./compose.sh up -d --build
-```
-
-Scale API and static frontend replicas with `--scale`. The Compose load
-balancer resolves replica service names through Docker DNS, while Redis and
-PostgreSQL remain shared services. This is a single-host Compose setup, not a
-multi-host orchestrator; use an external load balancer/database or an
-orchestrator if capacity needs to span hosts.
 
 ## Project layout
 

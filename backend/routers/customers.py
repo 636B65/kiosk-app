@@ -1,12 +1,14 @@
 import unicodedata
 from collections import defaultdict
-from typing import List
+from datetime import timedelta
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 import audit
+import pins
 from database import get_db
 from due_dates import get_due_date
 from models import Customer, Order, OrderItem, Product, Setting, User
@@ -17,9 +19,10 @@ from schemas import (
     CustomerWithBalance,
     FavoriteOut,
     MonthAgg,
+    PinChangeIn,
     WeekdayAgg,
 )
-from security import get_current_user
+from security import get_current_user, get_optional_user
 from timeutil import utcnow
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
@@ -62,6 +65,42 @@ def find_customer(db: Session, username: str) -> Customer:
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     return customer
+
+
+PIN_HEADER = "X-Customer-PIN"
+
+
+def check_customer_pin(db: Session, customer: Customer, pin: Optional[str]) -> None:
+    """Enforce a customer's PIN, if they set one. Commits attempt counters.
+
+    428 = PIN required, 403 = wrong PIN, 429 = locked after too many wrong PINs.
+    """
+    if not customer.has_pin:
+        return
+    now = utcnow()
+    if customer.pin_locked_until and customer.pin_locked_until > now:
+        minutes = max(1, int((customer.pin_locked_until - now).total_seconds() // 60) + 1)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many wrong PINs. Try again in {minutes} minute(s).",
+        )
+    if not pin:
+        raise HTTPException(status_code=428, detail="PIN required")
+    if not pins.verify_pin(customer.pin_hash, pin):
+        customer.pin_failed_attempts = (customer.pin_failed_attempts or 0) + 1
+        if customer.pin_failed_attempts >= pins.MAX_FAILED_ATTEMPTS:
+            customer.pin_failed_attempts = 0
+            customer.pin_locked_until = now + timedelta(minutes=pins.LOCK_MINUTES)
+            audit.record(
+                db, audit.KIOSK_ACTOR, "customer.pin_locked", "customer", customer.username,
+                f"{pins.MAX_FAILED_ATTEMPTS} wrong PINs; locked for {pins.LOCK_MINUTES} min",
+            )
+        db.commit()
+        raise HTTPException(status_code=403, detail="Wrong PIN")
+    if customer.pin_failed_attempts or customer.pin_locked_until:
+        customer.pin_failed_attempts = 0
+        customer.pin_locked_until = None
+        db.commit()
 
 
 def totals_for(db: Session, customer_id: int, status: str) -> float:
@@ -201,6 +240,7 @@ def list_customers(
                 id=c.id,
                 username=c.username,
                 created_at=c.created_at,
+                has_pin=c.has_pin,
                 balance=totals_for(db, c.id, "pending"),
                 total_paid=totals_for(db, c.id, "paid"),
                 order_count=db.query(Order)
@@ -243,8 +283,18 @@ def suggest_customers(
 
 
 @router.get("/{username}", response_model=CustomerHistoryOut)
-def customer_lookup(username: str, db: Session = Depends(get_db)):
+def customer_lookup(
+    username: str,
+    as_admin: bool = False,
+    pin: Optional[str] = Header(default=None, alias=PIN_HEADER),
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user),
+):
     customer = find_customer(db, username)
+    # Staff skip the PIN only when they ask for it explicitly (the admin panel
+    # does), so an admin token left in a kiosk browser does not unlock lookups.
+    if not (as_admin and user is not None):
+        check_customer_pin(db, customer, pin)
     orders = (
         db.query(Order)
         .options(joinedload(Order.items))
@@ -288,15 +338,62 @@ def settle_pending(db: Session, customer: Customer, actor: str, action: str) -> 
 
 
 @router.post("/{username}/self-mark-paid")
-def self_mark_paid(username: str, db: Session = Depends(get_db)):
+def self_mark_paid(
+    username: str,
+    pin: Optional[str] = Header(default=None, alias=PIN_HEADER),
+    db: Session = Depends(get_db),
+):
     setting = db.get(Setting, "customer_self_service_payment")
     if not setting or setting.value != "true":
         raise HTTPException(
             status_code=403, detail="Customer self-service payment is disabled"
         )
-    return settle_pending(
-        db, find_customer(db, username), audit.KIOSK_ACTOR, "customer.self_mark_paid"
+    customer = find_customer(db, username)
+    check_customer_pin(db, customer, pin)
+    return settle_pending(db, customer, audit.KIOSK_ACTOR, "customer.self_mark_paid")
+
+
+@router.post("/{username}/pin")
+def set_pin(username: str, data: PinChangeIn, db: Session = Depends(get_db)):
+    """A customer sets a PIN, or changes it (then the current PIN is required)."""
+    customer = find_customer(db, username)
+    if not pins.is_valid_pin(data.pin):
+        raise HTTPException(status_code=422, detail="The PIN must be 4 to 8 digits")
+    changing = customer.has_pin
+    if changing:
+        check_customer_pin(db, customer, data.current_pin)
+    customer.pin_hash = pins.hash_pin(data.pin)
+    customer.pin_failed_attempts = 0
+    customer.pin_locked_until = None
+    audit.record(
+        db, audit.KIOSK_ACTOR, "customer.pin_changed" if changing else "customer.pin_set",
+        "customer", customer.username,
     )
+    db.commit()
+    return {"username": customer.username, "has_pin": True}
+
+
+@router.post("/{username}/reset-pin")
+def reset_pin(
+    username: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Staff remove a forgotten PIN - only once the customer owes nothing."""
+    customer = find_customer(db, username)
+    if not customer.has_pin:
+        return {"username": customer.username, "has_pin": False}
+    if totals_for(db, customer.id, "pending") > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="The customer has unpaid orders. Settle the balance before resetting the PIN.",
+        )
+    customer.pin_hash = None
+    customer.pin_failed_attempts = 0
+    customer.pin_locked_until = None
+    audit.record(db, user.username, "customer.pin_reset", "customer", customer.username)
+    db.commit()
+    return {"username": customer.username, "has_pin": False}
 
 
 @router.post("/{username}/reset-payment")

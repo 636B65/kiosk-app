@@ -19,7 +19,9 @@ const API = {
         const data = await res.json().catch(() => null);
         if (!res.ok) {
             const detail = data && data.detail ? data.detail : `Request failed (${res.status})`;
-            throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+            const err = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+            err.status = res.status;
+            throw err;
         }
         return data;
     },
