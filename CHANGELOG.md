@@ -17,6 +17,13 @@ stay backwards compatible, **PATCH** for bug and security fixes only.
   boolean form fields default. The app uses neither (its only form input is the product
   image upload), so no code changes were needed.
 
+### Fixed
+- E2E: the self-scanning step sometimes timed out (it failed CI on `main` after 1.1.0).
+  The blocked-checkout step left a Chocolate Bar in the persisted cart, so the cart badge
+  already read 1 before the first scan, and the step's wait for 2 could miss the jump
+  from 1 to 3. The blocked-checkout step now empties its cart, and the scan step starts
+  from an empty cart. The app itself was not affected.
+
 ### Tests
 - With both updates on top of 1.1.0: backend 73 tests, E2E 47 steps (Node 24.22.1),
   Ruff 0.17.2 and mypy pass on Python 3.12 with the pinned requirements. The Docker + TLS
