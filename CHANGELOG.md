@@ -6,6 +6,22 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.1.1] - 2026-10-30
+
+### Changed
+- Dependency updates (Dependabot #39, #40):
+  - backend: FastAPI 0.149.0 -> 0.162.0, SQLAlchemy 2.1.5 -> 2.1.6,
+    pydantic-settings 2.16.0 -> 2.16.1;
+  - backend dev tools: httpx2 2.15.1 -> 2.16.0, Ruff 0.17.1 -> 0.17.2.
+- FastAPI 0.160 and 0.162 change how parameter models handle extra fields and how omitted
+  boolean form fields default. The app uses neither (its only form input is the product
+  image upload), so no code changes were needed.
+
+### Tests
+- With both updates on top of 1.1.0: backend 73 tests, E2E 47 steps (Node 24.22.1),
+  Ruff 0.17.2 and mypy pass on Python 3.12 with the pinned requirements. The Docker + TLS
+  smoke job runs in CI.
+
 ## [1.1.0] - 2026-10-27
 
 ### Added
