@@ -281,6 +281,8 @@ server.listen(PORT, async () => {
         return `blocked: ${toast.trim()}`;
       } finally {
         await setPaymentDueDate("");
+        // The blocked checkout keeps the Chocolate Bar in the persisted cart.
+        await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
       }
     });
 
@@ -445,6 +447,8 @@ server.listen(PORT, async () => {
     await step("customer: scan either barcode to add product to cart", async () => {
       await setSetting("kiosk_barcode_scanning", "true");
       try {
+        // Count from an empty cart: a leftover item makes the badge read "1" before any scan.
+        await page.evaluate(() => localStorage.removeItem("kiosk_cart"));
         await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
         await page.waitForSelector("#barcode-input");
         const input = page.locator("#barcode-input");
