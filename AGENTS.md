@@ -224,6 +224,11 @@ tests/e2e/
   keeps showing the persisted cart.
 - Routing is hash-based (`#/admin/dashboard` etc.) handled in `app.js::parseRoute`.
 - Format money with the currency from `Store.settings.currency` (SUPPORTED_CURRENCIES in app.js).
+- **Colours come from the CSS variables in `styles.css` `:root`**, which a
+  `@media (prefers-color-scheme: dark)` block redefines. Never hardcode a light colour
+  (`#fff`, light tints) in CSS or inline styles - add or reuse a variable with a dark value.
+  Check new UI in both schemes. `[hidden]` is forced to `display: none !important`, so the
+  `hidden` attribute works on flex/grid elements; `td.table-actions` must stay a table cell.
 - `Modal.open(content)`/`Modal.fill(content)`/`Modal.close()` for dialogs; `Toast.success/error`.
 - Admin views get their container with `const app = this.mainFor("<view>"); if (!app) return;`
   **after** their awaits, so a slow render never overwrites a view the admin moved on to.

@@ -850,6 +850,7 @@ server.listen(PORT, async () => {
       await page.locator(".checkout-btn").click();
       await page.waitForSelector("#checkout-form");
       if ((await activeId()) !== "co-username") throw new Error("cursor not in the username field");
+      if (await page.locator("#co-pin").isVisible()) throw new Error("PIN field shown before it was asked for");
       await page.keyboard.type(username);
       await page.keyboard.press("Enter");
     };
@@ -860,9 +861,11 @@ server.listen(PORT, async () => {
       await page.waitForSelector("#lookup-form");
       if ((await activeId()) !== "lk-username") throw new Error("cursor not in the lookup field");
       if (await page.locator("#cart-overlay").count()) throw new Error("User lookup also opened the cart");
+      // The PIN field only appears once an account asks for it.
+      if (await page.locator("#lk-pin").isVisible()) throw new Error("PIN field shown before it was asked for");
       await page.keyboard.press("Escape");
       await page.waitForSelector("#modal-overlay", { state: "detached" });
-      return "focused; no cart behind it; Esc closed the dialog";
+      return "focused; PIN hidden; no cart behind it; Esc closed the dialog";
     });
 
     await step("customer: Esc closes the order confirmation", async () => {

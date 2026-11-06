@@ -6,6 +6,39 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.2.0] - 2026-11-06
+
+### Added
+- **Dark mode.** The kiosk and the admin panel follow the device's light/dark setting
+  (`prefers-color-scheme`). All colours come from CSS variables with a dark palette (cards,
+  inputs, tables, status badges, dialogs, lookup suggestions, login). The page declares
+  `color-scheme: light dark`, so browsers no longer apply their own "auto dark" filter,
+  which produced poor contrast on phones and tablets.
+
+### Fixed
+- The PIN field and "Forgot your PIN?" were visible in the Buy and User lookup dialogs
+  before any PIN was asked for (since 1.1.0). `.form-group`'s `display: flex` overrode
+  the `hidden` attribute; a global `[hidden] { display: none !important; }` rule fixes it,
+  and the E2E suite now checks that the field stays hidden until it is needed.
+- Admin tables: the action buttons column (Mark paid/Cancel, Restock/Edit/Delete, ...) was
+  a flex box instead of a table cell, so row lines and the hover highlight stopped before
+  it and rows could misalign.
+- The admin sidebar scrolls on short screens, so the last menu items and **Sign out** are
+  always reachable (e.g. a tablet in landscape).
+
+### Changed
+- Dependency updates (Dependabot #43, #44):
+  - backend: pydantic 2.14.1 -> 2.14.2 (security fixes GHSA-qpmf-fgh3-ff25 and
+    GHSA-3r8g-cqwr-jr29), pydantic-settings 2.16.1 -> 2.16.2, python-multipart
+    0.0.32 -> 0.0.33;
+  - backend dev tools: pytest 9.1.1 -> 9.2.0, Ruff 0.17.2 -> 0.17.3, mypy 2.4.0 -> 2.4.1.
+    pytest 9.2's breaking change only concerns `-c`, which this repo does not use.
+
+### Tests
+- Backend 73 tests, E2E 47 steps (now also asserting the PIN field stays hidden until
+  asked for) on Node 24.22.1; Ruff 0.17.3 and mypy 2.4.1 pass on Python 3.12. Every
+  kiosk and admin view was checked in light and dark mode in a browser.
+
 ## [1.1.1] - 2026-10-30
 
 ### Changed
