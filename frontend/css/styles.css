@@ -1,14 +1,62 @@
 :root {
+    color-scheme: light dark;
     --primary: #2563eb;
     --primary-dark: #1d4ed8;
+    --primary-soft: #dbeafe;
+    --primary-softer: #eff6ff;
     --success: #16a34a;
     --danger: #dc2626;
     --warning: #d97706;
     --bg: #f1f5f9;
     --card: #ffffff;
+    --surface-2: #f8fafc;
+    --input-bg: #ffffff;
     --text: #1e293b;
     --muted: #64748b;
     --border: #e2e8f0;
+    --placeholder: #e2e8f0;
+    --placeholder-end: #f1f5f9;
+    --disabled: #cbd5e1;
+    --pending-bg: #fef3c7;
+    --pending-fg: #92400e;
+    --ok-bg: #dcfce7;
+    --ok-fg: #166534;
+    --bad-bg: #fee2e2;
+    --bad-fg: #991b1b;
+}
+
+/* Dark theme: follows the device setting (prefers-color-scheme). */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --primary: #3b82f6;
+        --primary-dark: #93c5fd;
+        --primary-soft: #1e3a8a;
+        --primary-softer: #172554;
+        --success: #22c55e;
+        --danger: #ef4444;
+        --warning: #f59e0b;
+        --bg: #0b1120;
+        --card: #1e293b;
+        --surface-2: #273449;
+        --input-bg: #0f172a;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --border: #334155;
+        --placeholder: #334155;
+        --placeholder-end: #1e293b;
+        --disabled: #475569;
+        --pending-bg: #451a03;
+        --pending-fg: #fcd34d;
+        --ok-bg: #052e16;
+        --ok-fg: #86efac;
+        --bad-bg: #450a0a;
+        --bad-fg: #fca5a5;
+    }
+}
+
+/* Author display rules (e.g. .form-group's flex) would otherwise beat the UA's [hidden]. */
+[hidden] {
+    display: none !important;
 }
 
 * {
@@ -35,7 +83,8 @@ input, select, textarea {
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--input-bg);
+    color: var(--text);
     outline: none;
 }
 
@@ -79,13 +128,13 @@ input:focus, select:focus, textarea:focus {
     padding: 0.5rem 0.9rem;
     border: 0;
     border-radius: 8px;
-    background: #dbeafe;
+    background: var(--primary-soft);
     color: var(--primary-dark);
     font-weight: 600;
 }
 
 .kiosk-header .cart-btn {
-    background: #fff;
+    background: var(--card);
     color: var(--primary);
     border: none;
     padding: 0.6rem 1.2rem;
@@ -165,7 +214,7 @@ input:focus, select:focus, textarea:focus {
 
 .product-image {
     height: 140px;
-    background: linear-gradient(135deg, #e2e8f0, #f1f5f9);
+    background: linear-gradient(135deg, var(--placeholder), var(--placeholder-end));
     border-radius: 10px;
     display: flex;
     align-items: center;
@@ -226,7 +275,7 @@ input:focus, select:focus, textarea:focus {
     height: 40px;
     object-fit: cover;
     border-radius: 6px;
-    background: #e2e8f0;
+    background: var(--placeholder);
 }
 
 .image-preview {
@@ -282,7 +331,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .add-btn:disabled {
-    background: #cbd5e1;
+    background: var(--disabled);
     cursor: not-allowed;
 }
 
@@ -508,7 +557,7 @@ input:focus, select:focus, textarea:focus {
     right: 0;
     z-index: 20;
     margin-top: 4px;
-    background: #fff;
+    background: var(--card);
     border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.15);
@@ -526,7 +575,8 @@ input:focus, select:focus, textarea:focus {
     text-align: left;
     padding: 0.6rem 0.75rem;
     border: none;
-    background: #fff;
+    background: var(--card);
+    color: var(--text);
     font-size: 1rem;
     border-bottom: 1px solid var(--border);
 }
@@ -537,7 +587,7 @@ input:focus, select:focus, textarea:focus {
 
 .lookup-suggestion:hover,
 .lookup-suggestion:focus {
-    background: #eff6ff;
+    background: var(--primary-softer);
     color: var(--primary-dark);
 }
 
@@ -600,7 +650,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .auth-card {
-    background: #fff;
+    background: var(--card);
     border-radius: 16px;
     padding: 2.5rem;
     width: 100%;
@@ -630,6 +680,7 @@ input:focus, select:focus, textarea:focus {
     position: sticky;
     top: 0;
     height: 100vh;
+    overflow-y: auto;
     flex-shrink: 0;
 }
 
@@ -760,12 +811,16 @@ th {
 }
 
 tr:hover td {
-    background: #f8fafc;
+    background: var(--surface-2);
 }
 
+/* Stays a table cell (display:flex on a <td> breaks row borders and hover). */
 .table-actions {
-    display: flex;
-    gap: 0.4rem;
+    white-space: nowrap;
+}
+
+.table-actions > * + * {
+    margin-left: 0.4rem;
 }
 
 .table-actions .btn {
@@ -780,10 +835,10 @@ tr:hover td {
     font-weight: 600;
 }
 
-.status-pending { background: #fef3c7; color: #92400e; }
-.status-completed { background: #dcfce7; color: #166534; }
-.status-paid { background: #dcfce7; color: #166534; }
-.status-cancelled { background: #fee2e2; color: #991b1b; }
+.status-pending { background: var(--pending-bg); color: var(--pending-fg); }
+.status-completed { background: var(--ok-bg); color: var(--ok-fg); }
+.status-paid { background: var(--ok-bg); color: var(--ok-fg); }
+.status-cancelled { background: var(--bad-bg); color: var(--bad-fg); }
 
 .toolbar {
     display: flex;
@@ -902,7 +957,7 @@ tr:hover td {
     font-weight: 700;
     padding: 0.4rem 0.5rem;
     margin-bottom: 0.5rem;
-    background: var(--surface-2, #f2f4f7);
+    background: var(--surface-2);
     border-radius: 8px;
     font-size: 0.95rem;
 }
