@@ -30,6 +30,7 @@ const Actions = {
 
 Actions.register("modal-close", () => Modal.close());
 Actions.register("show-changelog", () => AppInfo.openChangelog());
+Actions.register("cycle-theme", () => Theme.cycle());
 
 Actions.register("admin-new-product", () => Admin.openProductModal());
 Actions.register("admin-new-category", () => Admin.openCategoryModal());
