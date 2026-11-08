@@ -210,8 +210,9 @@ them to the GitHub Container Registry (GHCR):
 - `ghcr.io/636b65/kiosk/backend`
 - `ghcr.io/636b65/kiosk/frontend`
 
-Images are tagged with the SEMVER version (`v1.0.1` -> `1.0.1`) and `latest`,
-and are built for `linux/amd64`.
+Images are tagged with the SEMVER version (`v1.4.0` -> `1.4.0`) and `latest`,
+and are built for `linux/amd64`. The packages are **public**: no login or token is
+needed to pull them.
 
 `docker-compose.yml` still builds from source locally, so GHCR is an optional
 distribution channel rather than a hard dependency (useful for air-gapped
@@ -220,9 +221,9 @@ deployments where you pull once on a connected machine).
 To pull images directly:
 
 ```bash
-docker login ghcr.io -u <your-github-username> -G # or a PAT with read:packages
-docker pull ghcr.io/636b65/kiosk/backend:1.0.1
-docker pull ghcr.io/636b65/kiosk/frontend:1.0.1
+docker pull ghcr.io/636b65/kiosk/backend:latest
+docker pull ghcr.io/636b65/kiosk/frontend:latest
+# or pin a release, e.g. :1.4.0
 ```
 
 Note: GHCR package names are lowercase regardless of the account spelling.
