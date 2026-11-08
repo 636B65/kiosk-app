@@ -58,6 +58,7 @@ still running or failing.
 ## Operational notes
 
 - The release process is documented in `AGENTS.md`; keep this skill consistent with it.
-- GHCR packages may be private. Do not change package visibility or expose credentials.
+- GHCR packages are public (pull needs no login). Do not change package visibility or
+  expose credentials.
 - Do not claim CI or image publication succeeded based only on local tests or an accepted
   workflow run; inspect the completed workflow conclusions.

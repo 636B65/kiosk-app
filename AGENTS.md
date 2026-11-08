@@ -304,10 +304,8 @@ only for that step; the root `.dockerignore` limits it to the changelog, the scr
 values. The Pages workflow copies `CHANGELOG.md` and a `version.json` into `frontend/` before
 upload, and the e2e harness serves the root `CHANGELOG.md`.
 
-**Note:** the GHCR packages are currently **private** (unauthenticated `docker pull` → 401).
-Making them public requires the `read:packages` + `write:packages` scopes on the `gh` token
-(`gh auth refresh -h github.com -s read:packages,write:packages` or manual package settings);
-a token without those scopes gets HTTP 401/403 from the Packages API.
+**Note:** the GHCR packages are **public**; `docker pull` works without logging in. Keep them
+public: the README's pull instructions have no `docker login` step.
 
 ## Testing notes & gotchas
 
