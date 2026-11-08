@@ -100,6 +100,9 @@ class ProductUpdate(BaseModel):
     special_ends_on: Optional[date] = None
     cost_price: Optional[float] = Field(default=None, ge=0)
     stock: Optional[int] = None
+    # The stock the admin's form showed; when given, `stock` is only saved if the
+    # product still has exactly this much (else 409), so sales are never overwritten.
+    expected_stock: Optional[int] = None
     low_stock_threshold: Optional[int] = Field(default=None, ge=0)
     is_active: Optional[bool] = None
     category_id: Optional[int] = None

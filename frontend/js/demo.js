@@ -913,6 +913,9 @@
                 "special_starts_on", "special_ends_on", "cost_price", "stock",
                 "low_stock_threshold", "is_active", "category_id",
             ];
+            if (body.stock !== undefined && body.expected_stock != null && p.stock !== body.expected_stock) {
+                throw new ApiError(HTTP.CONFLICT, `The stock changed to ${p.stock} while you were editing (sales or a delivery). Nothing was saved; open the product again.`);
+            }
             const next = { ...p };
             for (const field of fields) if (body[field] !== undefined) next[field] = body[field];
             assertSpecialWindow(next);
@@ -1039,6 +1042,14 @@
             if (!order) throw new ApiError(HTTP.NOT_FOUND, "Order not found");
             const status = query.get("new_status");
             if (!["pending", "paid", "cancelled"].includes(status)) throw new ApiError(HTTP.BAD_REQUEST, "Invalid status");
+            const expected = query.get("expected_status");
+            if (expected && order.status !== expected) {
+                throw new ApiError(HTTP.CONFLICT, `Order #${order.id} is already ${order.status}; nothing was changed.`);
+            }
+            if (order.status === status) return orderOut(order);
+            if (order.status === "cancelled") {
+                throw new ApiError(HTTP.CONFLICT, "A cancelled order cannot be reopened or paid; place a new order instead.");
+            }
             if (order.status === "pending" && status === "cancelled") {
                 for (const it of order.items) {
                     const p = DB.products.find((x) => x.id === it.product_id);

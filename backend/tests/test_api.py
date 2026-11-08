@@ -1803,3 +1803,168 @@ def test_admin_resets_a_pin_only_when_nothing_is_owed(client, products, admin_he
 
     actions = [e["action"] for e in client.get("/api/audit?action=customer.pin", headers=admin_headers).json()]
     assert "customer.pin_reset" in actions and "customer.pin_set" in actions
+
+
+# ---- Stock consistency: the stock must only move with real sales and deliveries.
+# Invariant: stock == start + deliveries - units in orders that are not cancelled.
+
+
+def _expected_stock(product_id, start):
+    from sqlalchemy import text
+
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        sold = db.execute(text(
+            "SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi "
+            "JOIN orders o ON o.id = oi.order_id "
+            "WHERE oi.product_id = :p AND o.status != 'cancelled'"
+        ), {"p": product_id}).scalar()
+        delivered = db.execute(text(
+            "SELECT COALESCE(SUM(quantity), 0) FROM restocks WHERE product_id = :p"
+        ), {"p": product_id}).scalar()
+    finally:
+        db.close()
+    return start + delivered - sold
+
+
+def _stock(client, product_id):
+    return client.get(f"/api/products/{product_id}").json()["stock"]
+
+
+def _in_parallel(*calls):
+    """Run each call(client) at the same moment, each with its own client."""
+    from fastapi.testclient import TestClient
+    from main import app
+
+    barrier = threading.Barrier(len(calls))
+
+    def run(call):
+        with TestClient(app) as c:
+            barrier.wait()
+            return call(c)
+
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        return list(pool.map(run, calls))
+
+
+def _set_status(c, order_id, status, headers, expected=None):
+    params = {"new_status": status}
+    if expected:
+        params["expected_status"] = expected
+    return c.patch(f"/api/orders/{order_id}/status", params=params, headers=headers)
+
+
+def test_a_cancelled_order_cannot_be_reopened_or_paid(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=100)["id"]
+    order = _buy(client, f"stock_reopen_{uuid.uuid4().hex[:6]}", pid, 5)
+    assert _set_status(client, order["id"], "cancelled", admin_headers).status_code == 200
+    # Reopening it would count its items as sold while they are back in stock.
+    assert _set_status(client, order["id"], "pending", admin_headers).status_code == 409
+    assert _set_status(client, order["id"], "paid", admin_headers).status_code == 409
+    assert _set_status(client, order["id"], "cancelled", admin_headers).status_code == 200
+    assert _stock(client, pid) == 100 == _expected_stock(pid, 100)
+
+
+def test_undoing_a_payment_then_cancelling_restores_stock_once(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=100)["id"]
+    order = _buy(client, f"stock_undo_{uuid.uuid4().hex[:6]}", pid, 2)
+    for status in ("paid", "pending", "cancelled"):
+        assert _set_status(client, order["id"], status, admin_headers).status_code == 200
+    assert _stock(client, pid) == 100 == _expected_stock(pid, 100)
+
+
+def test_cancel_meant_for_a_pending_order_never_cancels_a_paid_one(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=100)["id"]
+    user = f"stock_expect_{uuid.uuid4().hex[:6]}"
+    order = _buy(client, user, pid, 2)
+    client.post(f"/api/customers/{user}/reset-payment", headers=admin_headers)
+    r = _set_status(client, order["id"], "cancelled", admin_headers, expected="pending")
+    assert r.status_code == 409 and "already paid" in r.json()["detail"]
+    assert client.get(f"/api/customers/{user}").json()["orders"][0]["status"] == "paid"
+    assert _stock(client, pid) == 98 == _expected_stock(pid, 100)
+
+
+def test_double_clicked_cancel_restores_stock_once(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=100)["id"]
+    for _ in range(5):
+        order = _buy(client, f"stock_dbl_{uuid.uuid4().hex[:6]}", pid, 3)
+        codes = [r.status_code for r in _in_parallel(*[
+            lambda c, o=order: _set_status(c, o["id"], "cancelled", admin_headers, expected="pending")
+        ] * 2)]
+        assert 200 in codes and set(codes) <= {200, 409}
+    assert _stock(client, pid) == 100 == _expected_stock(pid, 100)
+
+
+def test_cancel_racing_reset_payment_keeps_stock_consistent(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=100)["id"]
+    for _ in range(5):
+        user = f"stock_race_{uuid.uuid4().hex[:6]}"
+        order = _buy(client, user, pid, 2)
+        _in_parallel(
+            lambda c, o=order: _set_status(c, o["id"], "cancelled", admin_headers, expected="pending"),
+            lambda c, u=user: c.post(f"/api/customers/{u}/reset-payment", headers=admin_headers),
+        )
+        assert _stock(client, pid) == _expected_stock(pid, 100)
+
+
+def test_saving_a_product_form_never_overwrites_sales(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=50)["id"]
+    shown = _stock(client, pid)  # the admin opens the form
+    for _ in range(3):
+        _buy(client, f"stock_form_{uuid.uuid4().hex[:6]}", pid)
+
+    # Price changed, stock left alone: the form does not send the stock.
+    assert client.put(f"/api/products/{pid}", json={"price": 5.0}, headers=admin_headers).status_code == 200
+    assert _stock(client, pid) == 47
+
+    # Stock changed in the stale form: refused, nothing saved.
+    r = client.put(
+        f"/api/products/{pid}",
+        json={"stock": 60, "expected_stock": shown, "price": 6.0},
+        headers=admin_headers,
+    )
+    assert r.status_code == 409 and "changed to 47" in r.json()["detail"]
+    product = client.get(f"/api/products/{pid}").json()
+    assert (product["stock"], product["price"]) == (47, 5.0)
+
+    # With the current value it is a deliberate stock count and is saved.
+    r = client.put(
+        f"/api/products/{pid}", json={"stock": 60, "expected_stock": 47}, headers=admin_headers
+    )
+    assert r.status_code == 200 and r.json()["stock"] == 60
+
+
+def test_deliveries_and_cancels_racing_sales_keep_stock_consistent(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=200)["id"]
+
+    def sale(c):
+        return c.post("/api/orders", json={
+            "customer_username": f"stock_rush_{uuid.uuid4().hex[:6]}",
+            "items": [{"product_id": pid, "quantity": 1}],
+        })
+
+    for _ in range(4):
+        order = _buy(client, f"stock_rush_{uuid.uuid4().hex[:6]}", pid, 2)
+        _in_parallel(
+            lambda c: c.post(f"/api/products/{pid}/restock", json={"quantity": 5}, headers=admin_headers),
+            lambda c, o=order: _set_status(c, o["id"], "cancelled", admin_headers, expected="pending"),
+            sale, sale, sale,
+        )
+        assert _stock(client, pid) == _expected_stock(pid, 200)
+    deliveries = client.get(f"/api/products/{pid}/restocks", headers=admin_headers).json()
+    assert len(deliveries) == 4
+
+
+def test_simultaneous_first_purchases_of_a_new_customer_both_succeed(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=10)["id"]
+    user = f"stock_newbie_{uuid.uuid4().hex[:6]}"
+    results = _in_parallel(*[
+        lambda c: c.post("/api/orders", json={
+            "customer_username": user, "items": [{"product_id": pid, "quantity": 1}],
+        })
+    ] * 2)
+    assert [r.status_code for r in results] == [201, 201]
+    assert len(client.get(f"/api/customers/{user}").json()["orders"]) == 2
+    assert _stock(client, pid) == 8 == _expected_stock(pid, 10)

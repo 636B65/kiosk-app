@@ -400,6 +400,12 @@ const Kiosk = {
             Toast.error("Enter your username");
             return;
         }
+        // A double-tap (or Enter pressed twice) must not place the order twice:
+        // that books the items twice and the shelf no longer matches the stock.
+        if (this.placingOrder) return;
+        this.placingOrder = true;
+        const buyBtn = document.querySelector("#checkout-form button[type=submit]");
+        if (buyBtn) buyBtn.disabled = true;
         try {
             const items = Store.cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
             const order = await API.post("/orders", {
@@ -427,6 +433,9 @@ const Kiosk = {
             Toast.error(err.message);
             await Store.loadPublicData();
             this.renderBody();
+        } finally {
+            this.placingOrder = false;
+            if (buyBtn?.isConnected) buyBtn.disabled = false;
         }
     },
 

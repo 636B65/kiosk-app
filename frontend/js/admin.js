@@ -397,7 +397,6 @@ const Admin = {
                     .filter(Boolean),
                 category_id: document.getElementById("p-category").value ? parseInt(document.getElementById("p-category").value) : null,
                 price: parseFloat(document.getElementById("p-price").value) || 0,
-                stock: parseInt(document.getElementById("p-stock").value) || 0,
                 is_active: document.getElementById("p-active").checked,
                 is_weekly_special: isWeekly,
                 special_price: isWeekly && specialPriceInput !== "" ? parseFloat(specialPriceInput) : null,
@@ -406,6 +405,16 @@ const Admin = {
                 cost_price: costInput !== "" ? parseFloat(costInput) : null,
                 low_stock_threshold: Math.max(0, parseInt(document.getElementById("p-threshold").value) || 0),
             };
+            // Send the stock only when the admin changed it, with the value the form
+            // showed: the server refuses (409) if sales or a delivery changed it since,
+            // instead of overwriting them with the form's old number.
+            const stockInput = parseInt(document.getElementById("p-stock").value) || 0;
+            if (!id) {
+                payload.stock = stockInput;
+            } else if (stockInput !== product.stock) {
+                payload.stock = stockInput;
+                payload.expected_stock = product.stock;
+            }
             try {
                 const result = id
                     ? await API.put(`/products/${id}`, payload)
@@ -725,11 +734,14 @@ const Admin = {
 
     async changeOrderStatus(id, status) {
         try {
-            await API.patch(`/orders/${id}/status?new_status=${encodeURIComponent(status)}`, {});
+            // The buttons only exist on pending orders; the server refuses (409) if the
+            // order changed meanwhile, e.g. Reset payment marked it paid.
+            await API.patch(`/orders/${id}/status?new_status=${encodeURIComponent(status)}&expected_status=pending`, {});
             Toast.success(`Order #${id} marked ${status}`);
             this.renderOrders();
         } catch (err) {
             Toast.error(err.message);
+            this.renderOrders();
         }
     },
 

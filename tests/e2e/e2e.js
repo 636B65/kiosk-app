@@ -908,6 +908,28 @@ server.listen(PORT, async () => {
       return "confirmation closed with Esc";
     });
 
+    await step("customer: a double-tapped Buy places one order", async () => {
+      // Two orders for one tap would book the items twice: the stock would no
+      // longer match the shelf although nothing was taken.
+      const orders = async () =>
+        (await (await fetch(`http://${BACKEND}/api/customers/pin_e2e`)).json()).orders.length;
+      const before = await orders();
+      await page.locator(".product-card .add-btn").first().click();
+      await page.locator(".cart-btn", { hasText: "Cart" }).click();
+      await page.waitForSelector("#cart-overlay");
+      await page.locator(".checkout-btn").click();
+      await page.waitForSelector("#checkout-form");
+      await page.fill("#co-username", "pin_e2e");
+      await page.locator("#checkout-form button[type=submit]").dblclick();
+      await page.waitForFunction(() => (document.querySelector("#modal-overlay")?.textContent || "").includes("Order #"));
+      await page.waitForTimeout(800); // give a second request time to land, if one was sent
+      const added = (await orders()) - before;
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#modal-overlay", { state: "detached" });
+      if (added !== 1) throw new Error(`one double-tap placed ${added} orders`);
+      return "one order for a double-tap";
+    });
+
     await step("customer: sets a PIN from the lookup", async () => {
       await page.evaluate(() => Kiosk.openLookup());
       await page.keyboard.type("pin_e2e");

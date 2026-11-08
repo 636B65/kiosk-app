@@ -318,9 +318,19 @@ def settle_pending(db: Session, customer: Customer, actor: str, action: str) -> 
         .filter(Order.customer_id == customer.id, Order.status == "pending")
         .all()
     )
+    # Compare-and-set per order: an order cancelled by staff at this very moment
+    # (its stock already restored) must not end up paid.
+    now = utcnow()
+    settled = []
     for order in orders:
-        order.status = "paid"
-        order.completed_at = utcnow()
+        claimed = (
+            db.query(Order)
+            .filter(Order.id == order.id, Order.status == "pending")
+            .update({"status": "paid", "completed_at": now}, synchronize_session=False)
+        )
+        if claimed:
+            settled.append(order)
+    orders = settled
     amount = round(sum(o.total for o in orders), 2)
     if orders:
         audit.record(
