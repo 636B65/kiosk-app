@@ -107,6 +107,10 @@ tests/e2e/
   verify identity or receipt of payment; enable it only when that trust model is acceptable.
 - **Admin payment**: `PATCH /api/orders/{id}/status` accepts `pending|paid|cancelled`.
   Cancelling a `pending` order **restores stock**; paid orders can't have stock restored.
+  Allowed moves: pending -> paid/cancelled, paid -> pending/cancelled; **cancelled is final**
+  (409), because its stock is already back. Status changes are compare-and-set (a lost race
+  gets 409); the admin buttons send `expected_status=pending` so a Cancel never becomes
+  paid -> cancelled when Reset payment won the race.
 - **Due date**: Setting `payment_due_date` (ISO date `YYYY-MM-DD`, default `""` = no end date).
   When set, new orders get `due_date = <that date> 23:59:59` (naive UTC). Empty/invalid = `NULL`.
   This is the store-wide "pay by" moment shown in admin and on customer lookups, and once it
@@ -153,6 +157,13 @@ tests/e2e/
   products by quantity over non-cancelled orders); the lookup shows them as one-tap
   add-to-cart buttons.
 - **Stock**: decremented at order creation; never negative (400 if insufficient).
+  **Never read-modify-write the stock** in Python: every change is one SQL statement
+  (`stock = stock - q WHERE stock >= q` on sale, `stock = stock + q` on cancel and restock),
+  or concurrent requests overwrite each other. `PUT /api/products/{id}` sets `stock` only
+  with the `expected_stock` the admin form showed (409 if it moved); the form omits `stock`
+  when unchanged. The kiosk ignores a second Buy while one is in flight (`placingOrder`).
+  Invariant (tested with simultaneous requests at the end of `test_api.py`):
+  stock = start + restocks - units in non-cancelled orders.
 - **Customer PINs (optional)**: a customer sets a 4-8 digit PIN from the kiosk lookup
   (`POST /api/customers/{username}/pin`; changing it needs `current_pin`). Stored only as
   `Argon2id(HMAC-SHA256(pepper, pin))` (`pins.py`, explicit params m=64 MiB, t=3, p=4).

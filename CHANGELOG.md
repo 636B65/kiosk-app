@@ -6,6 +6,41 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.4.0] - 2026-11-08
+
+### Fixed
+Stock could drift away from the shelf **without anything being stolen**. A test harness
+that drives a live, multi-threaded backend found these paths. It checks after every scenario
+that stock = start + deliveries - units in orders that are not cancelled.
+- **Double-tap on Buy** placed the order twice: the items were booked twice and the customer
+  was charged twice. The kiosk now ignores a second submit while the first is on its way.
+- **Delivery (restock) or cancellation at the same moment as a sale** overwrote the sale's
+  stock decrement (read-modify-write). Both now change the stock in a single SQL statement.
+- **Saving the product form** wrote back the stock the form showed when it was opened,
+  wiping out sales made meanwhile. The form now only sends the stock when the admin changed
+  it, together with the value it showed (`expected_stock`). If the stock moved since, the
+  save is refused (409) and nothing is changed.
+- **Double-clicking Cancel** could restore the stock twice. Status changes are now
+  compare-and-set, so only one of two simultaneous changes wins (the other gets 409).
+- **Cancel at the same moment as Reset payment** could turn into "paid, then cancelled",
+  which (by design) does not restore stock, so the items vanished from the count. The admin
+  buttons now send `expected_status=pending` and the server refuses (409) if the order is no
+  longer pending. Reset payment and self-mark-paid also skip an order cancelled meanwhile.
+- **A cancelled order could be reopened or marked paid** through the API. Its stock had
+  already been restored, so it was counted as sold and in stock at once. Cancelled is now
+  final (409).
+- Two simultaneous first purchases by a **new customer** failed with a server error (500)
+  for one of them. The second now waits for the customer the first created and goes through.
+
+### Added
+- `PATCH /api/orders/{id}/status?expected_status=` and `expected_stock` on
+  `PUT /api/products/{id}` (both optional) for compare-and-set updates.
+
+### Tests
+- Backend: 81 tests (8 new stock-consistency tests, several with simultaneous requests,
+  which fail on 1.3.0). E2E: 49 steps (new: a double-tapped Buy places one order). Ruff,
+  mypy and JavaScript syntax pass.
+
 ## [1.3.0] - 2026-11-08
 
 ### Added

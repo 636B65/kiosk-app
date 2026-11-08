@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import audit
@@ -16,6 +17,13 @@ from timeutil import utcnow
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 VALID_STATUSES = ("pending", "paid", "cancelled")
+# A cancelled order has already given its stock back, so it can never become
+# pending or paid again (that would count its items as sold and in stock at once).
+ALLOWED_TRANSITIONS = {
+    "pending": {"paid", "cancelled"},
+    "paid": {"pending", "cancelled"},
+    "cancelled": set(),
+}
 
 
 def get_or_create_customer(db: Session, username: str) -> Customer:
@@ -72,6 +80,25 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
         check_customer_pin(db, existing, data.customer_pin)
     db.commit()
 
+    try:
+        return _place_order(db, data)
+    except IntegrityError:
+        # Two first purchases for the same new username raced to create the
+        # customer; the loser's transaction (stock included) was rolled back.
+        # The customer exists now, so placing the order again succeeds.
+        db.rollback()
+        created = (
+            db.query(Customer)
+            .filter(Customer.username == normalize_username(data.customer_username))
+            .first()
+        )
+        if created is not None:
+            check_customer_pin(db, created, data.customer_pin)
+        db.commit()
+        return _place_order(db, data)
+
+
+def _place_order(db: Session, data: OrderCreate) -> Order:
     with db.begin():
         customer = get_or_create_customer(db, data.customer_username)
 
@@ -152,6 +179,7 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
 def update_order_status(
     order_id: int,
     new_status: str,
+    expected_status: Optional[str] = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -161,23 +189,55 @@ def update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     previous = order.status
-
-    if order.status == "pending" and new_status == "cancelled":
-        for item in order.items:
-            product = item.product
-            if product:
-                product.stock += item.quantity
-
-    order.status = new_status
-    if new_status != "pending":
-        order.completed_at = utcnow()
-    if previous != new_status:
-        restored = " (stock restored)" if previous == "pending" and new_status == "cancelled" else ""
-        audit.record(
-            db, user.username, f"order.{new_status}", "order", order.id,
-            f"{order.customer_username or '-'}: {previous} -> {new_status}, "
-            f"total {order.total}{restored}",
+    # The admin buttons send the status they were shown: a "Cancel" meant for a
+    # pending order must not turn into paid -> cancelled (no stock restored)
+    # because Reset payment marked it paid a moment earlier.
+    if expected_status is not None and previous != expected_status:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Order #{order.id} is already {previous}; nothing was changed.",
         )
+    if new_status == previous:
+        return order
+    if new_status not in ALLOWED_TRANSITIONS[previous]:
+        raise HTTPException(
+            status_code=409,
+            detail="A cancelled order cannot be reopened or paid; place a new order instead.",
+        )
+
+    # Compare-and-set: of two simultaneous changes (a double-click on Cancel,
+    # Cancel racing Reset payment) only one may win, or stock is restored twice
+    # or an order ends up paid with its stock given back.
+    values = {"status": new_status}
+    if new_status != "pending":
+        values["completed_at"] = utcnow()
+    claimed = (
+        db.query(Order)
+        .filter(Order.id == order_id, Order.status == previous)
+        .update(values, synchronize_session=False)
+    )
+    if claimed != 1:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="The order was changed at the same time by someone else. Reload and try again.",
+        )
+
+    restored = ""
+    if previous == "pending" and new_status == "cancelled":
+        # Increment in SQL, never read-modify-write: a sale committed between
+        # reading and writing the stock would otherwise be lost.
+        for item in order.items:
+            db.execute(
+                text("UPDATE products SET stock = stock + :quantity WHERE id = :product_id"),
+                {"product_id": item.product_id, "quantity": item.quantity},
+            )
+        restored = " (stock restored)"
+    audit.record(
+        db, user.username, f"order.{new_status}", "order", order.id,
+        f"{order.customer_username or '-'}: {previous} -> {new_status}, "
+        f"total {order.total}{restored}",
+    )
     db.commit()
     db.refresh(order)
     return order

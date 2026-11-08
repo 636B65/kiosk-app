@@ -3,6 +3,7 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -199,8 +200,27 @@ def update_product(
     before = _audit_snapshot(product)
     values = data.model_dump(exclude_unset=True)
     barcodes = values.pop("barcodes", None)
+    new_stock = values.pop("stock", None)
+    expected_stock = values.pop("expected_stock", None)
     for field, value in values.items():
         setattr(product, field, value)
+    if new_stock is not None:
+        # Set stock in SQL, and only if it still is what the admin's form showed:
+        # sales or deliveries since the form opened must not be overwritten.
+        query = db.query(Product).filter(Product.id == product_id)
+        if expected_stock is not None:
+            query = query.filter(Product.stock == expected_stock)
+        if query.update({"stock": new_stock}, synchronize_session=False) != 1:
+            db.rollback()
+            current = db.get(Product, product_id)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"The stock changed to {current.stock if current else '?'} while you "
+                    "were editing (sales or a delivery). Nothing was saved; open the "
+                    "product again."
+                ),
+            )
     if (
         product.special_starts_on
         and product.special_ends_on
@@ -218,6 +238,8 @@ def update_product(
             ProductBarcode(code=code) for code in barcodes
         )
     after = _audit_snapshot(product)
+    if new_stock is not None:
+        after["stock"] = new_stock
     if barcodes is not None:
         after["barcodes"] = barcodes
     changes = audit.describe_changes(before, after)
@@ -267,7 +289,14 @@ def restock_product(
     product = db.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    product.stock = (product.stock or 0) + data.quantity
+    # Add in SQL, never read-modify-write: a sale committed between reading and
+    # writing the stock would otherwise be lost. Our UPDATE holds SQLite's write
+    # lock, so the stock read back right after is exactly what this delivery left.
+    db.query(Product).filter(Product.id == product_id).update(
+        {"stock": func.coalesce(Product.stock, 0) + data.quantity},
+        synchronize_session=False,
+    )
+    stock_after = db.query(Product.stock).filter(Product.id == product_id).scalar()
     if data.unit_cost is not None:
         product.cost_price = data.unit_cost
     restock = Restock(
@@ -275,7 +304,7 @@ def restock_product(
         product_name=product.name,
         quantity=data.quantity,
         unit_cost=data.unit_cost,
-        stock_after=product.stock,
+        stock_after=stock_after,
         note=data.note.strip(),
         created_by=user.username,
     )
@@ -283,7 +312,7 @@ def restock_product(
     cost = f" at {data.unit_cost} each" if data.unit_cost is not None else ""
     audit.record(
         db, user.username, "product.restock", "product", product.id,
-        f"{product.name}: +{data.quantity}{cost}; stock now {product.stock}",
+        f"{product.name}: +{data.quantity}{cost}; stock now {stock_after}",
     )
     db.commit()
     db.refresh(restock)
