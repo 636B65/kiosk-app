@@ -25,9 +25,11 @@
     --bad-fg: #991b1b;
 }
 
-/* Dark theme: follows the device setting (prefers-color-scheme). */
+/* Dark theme. The footer's theme switch (js/theme.js) sets data-theme on <html>:
+   none = follow the device (prefers-color-scheme), "light" or "dark" = forced.
+   Keep both dark blocks identical. */
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
         --primary: #3b82f6;
         --primary-dark: #93c5fd;
         --primary-soft: #1e3a8a;
@@ -52,6 +54,40 @@
         --bad-bg: #450a0a;
         --bad-fg: #fca5a5;
     }
+}
+
+:root[data-theme="dark"] {
+    --primary: #3b82f6;
+    --primary-dark: #93c5fd;
+    --primary-soft: #1e3a8a;
+    --primary-softer: #172554;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+    --bg: #0b1120;
+    --card: #1e293b;
+    --surface-2: #273449;
+    --input-bg: #0f172a;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --border: #334155;
+    --placeholder: #334155;
+    --placeholder-end: #1e293b;
+    --disabled: #475569;
+    --pending-bg: #451a03;
+    --pending-fg: #fcd34d;
+    --ok-bg: #052e16;
+    --ok-fg: #86efac;
+    --bad-bg: #450a0a;
+    --bad-fg: #fca5a5;
+}
+
+:root[data-theme="light"] {
+    color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
 }
 
 /* Author display rules (e.g. .form-group's flex) would otherwise beat the UA's [hidden]. */
@@ -669,6 +705,13 @@ input:focus, select:focus, textarea:focus {
 .admin-layout {
     display: flex;
     min-height: 100vh;
+}
+
+/* The flex item next to the sidebar. Without min-width: 0 it never shrinks below its
+   widest table, so the page grew wider than the screen instead of .admin-main scrolling. */
+#admin-main-container {
+    flex: 1;
+    min-width: 0;
 }
 
 .admin-sidebar {

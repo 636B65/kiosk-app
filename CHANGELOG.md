@@ -6,6 +6,24 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.3.0] - 2026-11-08
+
+### Added
+- **Theme switch** in the footer (kiosk and admin): **Auto** follows the device's
+  light/dark setting, **Light** and **Dark** force a theme regardless of the device. In
+  1.2.0 a device in dark mode always got the dark theme. The choice is remembered per
+  browser (`localStorage["kiosk_theme"]`) and applied before the first paint by the new
+  `js/theme.js`, so the page never flashes the wrong colours.
+
+### Fixed
+- Admin pages with wide tables (orders, products, customers) made the whole page wider
+  than the screen on smaller displays (e.g. a 1000 px tablet), cutting off the last column.
+  The admin content area now shrinks next to the sidebar and scrolls its tables instead.
+
+### Tests
+- E2E: 48 steps (new: the theme switch overrides a dark and a light device, and the choice
+  survives a reload). Backend 73 tests, Ruff, mypy and JavaScript syntax pass.
+
 ## [1.2.0] - 2026-11-06
 
 ### Added

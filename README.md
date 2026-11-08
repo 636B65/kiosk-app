@@ -45,7 +45,8 @@ sample data. Everything lives in your browser and **resets on reload**.
 - The cursor jumps to the username (and PIN) field on Buy and User lookup; Esc closes
   dialogs
 - Self-scanning of product barcodes at the kiosk, off by default (Settings)
-- Dark mode: kiosk and admin panel follow the device's light/dark setting
+- Light and dark mode: the footer's theme switch picks Auto (follow the device), Light or
+  Dark, remembered per browser
 - Idle reset: after a configurable time without a touch (default 90 s) the kiosk
   warns for 10 seconds, then clears the cart and closes open dialogs so the next
   customer never sees the previous one's cart or balance

@@ -67,9 +67,10 @@ backend/
   tests/           test_api.py (full API suite) + test_due_dates.py (units)
 frontend/
   version.json     dev placeholder; the Docker build overwrites it with release + commit
-  index.html       footer (release, commit, Changelog button); no <meta> CSP; scripts loaded in fixed order (demo -> api -> app -> customer -> admin -> handlers -> debug)
+  index.html       footer (release, commit, Changelog button); no <meta> CSP; theme.js in <head>; other scripts loaded in fixed order (demo -> api -> app -> customer -> admin -> handlers -> debug)
   css/             styles.css
   js/
+    theme.js       Theme (Auto/Light/Dark), loaded in <head> before first paint
     demo.js        in-browser API mock for the GitHub Pages demo (no-op unless .github.io host or ?demo=1)
     api.js         fetch wrapper + token storage
     app.js         entry: route handling, Store, Toast, Modal, AppInfo (footer), currency list
@@ -208,7 +209,7 @@ tests/e2e/
 
 ## Frontend conventions
 
-- **No build step, no JS modules.** Globals: `Store`, `API`, `Modal`, `Toast`, `AppInfo`, `Kiosk`,
+- **No build step, no JS modules.** Globals: `Theme`, `Store`, `API`, `Modal`, `Toast`, `AppInfo`, `Kiosk`,
   `Admin`, `Actions`, `Debug`. Script include order in `index.html` defines load order.
 - `demo.js` is a `<script>` hook loaded **before** `api.js`. It is a no-op unless the
   host is `*.github.io` or the URL has `?demo=1`; in demo mode it replaces `window.fetch`
@@ -224,8 +225,11 @@ tests/e2e/
   keeps showing the persisted cart.
 - Routing is hash-based (`#/admin/dashboard` etc.) handled in `app.js::parseRoute`.
 - Format money with the currency from `Store.settings.currency` (SUPPORTED_CURRENCIES in app.js).
-- **Colours come from the CSS variables in `styles.css` `:root`**, which a
-  `@media (prefers-color-scheme: dark)` block redefines. Never hardcode a light colour
+- **Colours come from the CSS variables in `styles.css` `:root`**. The dark values are
+  defined twice and must stay identical: under `@media (prefers-color-scheme: dark)` for
+  `:root:not([data-theme="light"])` (Auto) and under `:root[data-theme="dark"]` (forced).
+  `js/theme.js` (global `Theme`, loaded in `<head>`) sets `data-theme` from
+  `localStorage["kiosk_theme"]`; the footer's `#theme-btn` cycles Auto -> Light -> Dark. Never hardcode a light colour
   (`#fff`, light tints) in CSS or inline styles - add or reuse a variable with a dark value.
   Check new UI in both schemes. `[hidden]` is forced to `display: none !important`, so the
   `hidden` attribute works on flex/grid elements; `td.table-actions` must stay a table cell.

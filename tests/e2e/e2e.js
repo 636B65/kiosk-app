@@ -204,6 +204,38 @@ server.listen(PORT, async () => {
       return `${version}; latest ${first}`;
     });
 
+    await step("customer: theme switch forces light or dark and remembers it", async () => {
+      const LIGHT = "rgb(241, 245, 249)";
+      const DARK = "rgb(11, 17, 32)";
+      const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+      const btn = page.locator("#theme-btn");
+      const expect = async (label, color) => {
+        const text = (await btn.textContent()).trim();
+        if (!text.endsWith(label)) throw new Error(`button says "${text}", expected ${label}`);
+        const got = await bg();
+        if (got !== color) throw new Error(`${label}: background ${got}, expected ${color}`);
+      };
+      try {
+        // A device in dark mode: Auto follows it, Light overrides it.
+        await page.emulateMedia({ colorScheme: "dark" });
+        await expect("Auto", DARK);
+        await btn.click();
+        await expect("Light", LIGHT);
+        await page.reload({ waitUntil: "networkidle" });
+        await expect("Light", LIGHT);
+        // A device in light mode: Dark overrides it.
+        await page.emulateMedia({ colorScheme: "light" });
+        await btn.click();
+        await expect("Dark", DARK);
+        await btn.click();
+        await expect("Auto", LIGHT);
+      } finally {
+        await page.emulateMedia({ colorScheme: "light" });
+        await page.evaluate(() => localStorage.removeItem("kiosk_theme"));
+      }
+      return "Auto follows the device; Light and Dark override it and survive a reload";
+    });
+
     await step("customer: add to cart (no tax line)", async () => {
       const card = page.locator(".product-card", { hasText: "USB-C Cable" }).first();
       await card.locator(".add-btn").click();
