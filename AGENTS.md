@@ -36,6 +36,8 @@ node --check frontend/js/*.js
 cd tests/e2e && npm ci
 CHROMIUM_PATH=/usr/bin/chromium E2E_PYTHON=python3.12 npm test
 
+# Run the published images without building: docker-compose.prebuilt.yml (README quick start)
+
 # Full stack with TLS (self-signed cert generated into data/tls/ on first boot)
 docker compose up -d --build
 curl -sk https://localhost/api/health
@@ -52,7 +54,7 @@ backend/
   main.py          app wiring, CORS, mounts /api/images, runs migrate()+seed() at startup
   config.py        Settings (pydantic-settings, env_file=".env"), SECRET_KEY handling
   database.py      SQLite engine + session (read DATABASE_PATH at import time)
-  models.py        User, Category, Product, Customer, Order, OrderItem, Setting
+  models.py        User, Category, Product, Customer, Order, OrderItem, Restock, StockAdjustment, Setting
   migrations.py    idempotent SQLite ALTER TABLE-style migrations + ADDED_COLUMNS, run at startup
   seed.py          admin user (ADMIN_PASSWORD or random) + demo categories/products/settings
   audit.py         audit.record(db, actor, action, ...) helper (no commit; caller commits)
@@ -62,8 +64,8 @@ backend/
   timeutil.py      utcnow()        # naive UTC. NEVER use datetime.utcnow()
   due_dates.py     payment_due_date parsing/computation helpers
   schemas.py       Pydantic v2 response/serialization schemas
-  routers/         auth, audit, categories, customers, orders, products, reports, restocks,
-                   settings, system (status + backups), users
+  routers/         auth, audit, categories, customers, inventory (counts), orders, products,
+                   reports (incl. shrinkage, reorder), restocks, settings, system (status + backups), users
   tests/           test_api.py (full API suite) + test_due_dates.py (units)
 frontend/
   version.json     dev placeholder; the Docker build overwrites it with release + commit
@@ -129,7 +131,14 @@ tests/e2e/
   unless a valid admin token is sent (`get_optional_user`). Orders snapshot the cost
   into `OrderItem.unit_cost` (never exposed in order/lookup schemas).
   `GET /api/reports/margins?period=today|week|month|all` reports revenue, cost and
-  margin of paid lines; lines without a cost count as revenue but not toward margin.
+  margin of the lines on the chosen basis (below); lines without a cost count as revenue
+  but not toward margin.
+- **Report basis** (`reports.py::basis_scope`, mirrored in `demo.js`): sales statistics
+  (summary cards, top customers/products, sales-by-day, margins, CSV) take
+  `basis=sales|paid`, default **sales** = every order that is not cancelled, unpaid credit
+  included, dated by `created_at`; **paid** = paid orders dated by `completed_at`. The
+  admin switch stores the choice in `localStorage["kiosk_report_basis"]`. Payment figures
+  (outstanding, last payment, a customer's total paid) are always about payments.
 - **Restocks**: `POST /api/products/{id}/restock` (admin; quantity 1..100000, optional
   `unit_cost` which also becomes the product's `cost_price`, note) adds stock and logs a
   `Restock` row; history via `GET /api/products/{id}/restocks` and `GET /api/restocks`.
@@ -139,7 +148,7 @@ tests/e2e/
 - **Audit log** (`GET /api/audit?action=<prefix>&limit=`, admin): written in the same
   transaction as the change for order status changes (`order.<status>`), reset payment
   (`customer.reset_payment`), self-mark-paid (`customer.self_mark_paid`, actor `kiosk`),
-  product create/update/delete/restock, changed settings, user create/update/delete
+  product create/update/delete/restock/count, changed settings, user create/update/delete
   (never the password itself) and backup create/download. New admin mutations should
   call `audit.record(...)` too.
 - **Backups**: SQLite only. `backups.py` writes `kiosk-YYYYmmdd-HHMMSS[-N].db` with
@@ -163,7 +172,22 @@ tests/e2e/
   with the `expected_stock` the admin form showed (409 if it moved); the form omits `stock`
   when unchanged. The kiosk ignores a second Buy while one is in flight (`placingOrder`).
   Invariant (tested with simultaneous requests at the end of `test_api.py`):
-  stock = start + restocks - units in non-cancelled orders.
+  stock = start + restocks + count adjustments - units in non-cancelled orders.
+- **Inventory counts**: `POST /api/inventory/counts` (admin; items of `product_id`,
+  `counted` >= 0, `expected_stock` = what the count sheet showed, optional `reason`
+  shrinkage|damaged|expired|miscount|other, `note`). Each line is compare-and-set on
+  `expected_stock`: a moved stock is returned in `conflicts` and left alone, the rest is
+  saved. Each saved line is a `StockAdjustment` (`difference` = counted - expected, reason
+  defaults to shrinkage/miscount/match by sign, `unit_cost` snapshot) and a `product.count`
+  audit entry. `GET /api/reports/shrinkage?period=` sums missing/extra units per product,
+  missing valued at the snapshot cost.
+- **Reorder suggestions**: `GET /api/reports/reorder?days=28&cover_days=14` (and `.csv`):
+  for active products, suggested = ceil(sold_in_days / days * cover_days) + threshold - stock
+  (only > 0 listed), sales over non-cancelled orders. CSV cells go through `csv_safe`.
+- **Account statements** are built client-side (`Admin.statementHtml`) from the admin
+  lookup (`?as_admin=true`): opening = non-cancelled orders before the period - paid
+  before it (by `completed_at`); + purchases - payments in it = closing. Cancelled orders
+  are left out. Printing uses `@media print` (dialog only when one is open, light palette).
 - **Customer PINs (optional)**: a customer sets a 4-8 digit PIN from the kiosk lookup
   (`POST /api/customers/{username}/pin`; changing it needs `current_pin`). Stored only as
   `Argon2id(HMAC-SHA256(pepper, pin))` (`pins.py`, explicit params m=64 MiB, t=3, p=4).

@@ -61,9 +61,10 @@
             backup_keep: "7",
         },
         restocks: [],
+        adjustments: [],
         audit: [],
         tokens: {},
-        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100, restock: 1, audit: 1 },
+        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100, restock: 1, adjustment: 1, audit: 1 },
     };
 
     const CAT_ID = (name) => DB.categories.find((c) => c.name === name).id;
@@ -241,11 +242,27 @@
             }));
     }
 
-    function marginsFor(start, end) {
+    // Mirrors backend/routers/reports.py::basis_scope: "sales" counts every order
+    // that is not cancelled (credit included) on its purchase date, "paid" only
+    // paid orders on their payment date.
+    function inBasis(o, basis) {
+        return basis === "paid" ? o.status === "paid" : o.status !== "cancelled";
+    }
+    function basisAt(o, basis) {
+        return basis === "paid" ? (o.completed_at || o.created_at) : o.created_at;
+    }
+    function basisOf(query) {
+        const basis = query.get("basis") || "sales";
+        if (!["sales", "paid"].includes(basis)) throw new ApiError(HTTP.UNPROCESSABLE, "Invalid basis");
+        return basis;
+    }
+    const BASIS_LABEL = { sales: "all sales incl. unpaid (credit)", paid: "paid orders only" };
+
+    function marginsFor(start, end, basis = "sales") {
         const byName = {};
         for (const o of DB.orders) {
-            if (o.status !== "paid") continue;
-            const paidAt = new Date(o.completed_at || o.created_at);
+            if (!inBasis(o, basis)) continue;
+            const paidAt = new Date(basisAt(o, basis));
             if (start && paidAt < start) continue;
             if (end && paidAt >= end) continue;
             for (const it of o.items) {
@@ -496,11 +513,11 @@
         return DB.orders.filter((o) => o.customer_id === customerId && o.status === "pending");
     }
 
-    function revenueForPeriod(start, end) {
+    function revenueForPeriod(start, end, basis = "sales") {
         let sum = 0, count = 0;
         for (const o of DB.orders) {
-            if (o.status !== "paid") continue;
-            const paidAt = o.completed_at || o.created_at;
+            if (!inBasis(o, basis)) continue;
+            const paidAt = basisAt(o, basis);
             if (start && paidAt < start) continue;
             if (end && paidAt >= end) continue;
             sum += o.total;
@@ -509,7 +526,7 @@
         return { order_count: count, revenue: Math.round(sum * 100) / 100 };
     }
 
-    function reportsSummary() {
+    function reportsSummary(basis = "sales") {
         const now = new Date();
         const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const todayStart = fmtDT(t0);
@@ -523,23 +540,24 @@
         const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         const lowStock = lowStockProducts();
         return {
-            today: revenueForPeriod(todayStart, tomorrowStart),
-            yesterday: revenueForPeriod(yStart, todayStart),
-            week: revenueForPeriod(fmtDT(weekStart), fmtDT(nextWeek)),
-            month: revenueForPeriod(fmtDT(monthStart), fmtDT(nextMonth)),
-            all_time: revenueForPeriod(),
+            basis,
+            today: revenueForPeriod(todayStart, tomorrowStart, basis),
+            yesterday: revenueForPeriod(yStart, todayStart, basis),
+            week: revenueForPeriod(fmtDT(weekStart), fmtDT(nextWeek), basis),
+            month: revenueForPeriod(fmtDT(monthStart), fmtDT(nextMonth), basis),
+            all_time: revenueForPeriod(undefined, undefined, basis),
             outstanding: Math.round(DB.orders.filter((o) => o.status === "pending").reduce((s, o) => s + o.total, 0) * 100) / 100,
             pending_orders: DB.orders.filter((o) => o.status === "pending").length,
             next_due_date: dueTime(),
             low_stock_products: lowStock,
-            margin_month: marginsFor(monthStart, nextMonth).totals,
+            margin_month: marginsFor(monthStart, nextMonth, basis).totals,
         };
     }
 
-    function topProducts(limit) {
+    function topProducts(limit, basis = "sales") {
         const byName = {};
         for (const o of DB.orders) {
-            if (o.status !== "paid") continue;
+            if (!inBasis(o, basis)) continue;
             for (const it of o.items) {
                 const row = byName[it.product_name] || { quantity: 0, revenue: 0 };
                 row.quantity += it.quantity;
@@ -557,12 +575,12 @@
             .slice(0, limit);
     }
 
-    function salesByDay(days) {
+    function salesByDay(days, basis = "sales") {
         const start = fmtDT(daysAgo(days));
         const byDay = {};
         for (const o of DB.orders) {
-            const paidAt = o.completed_at || o.created_at;
-            if (o.status !== "paid" || paidAt < start) continue;
+            const paidAt = basisAt(o, basis);
+            if (!inBasis(o, basis) || paidAt < start) continue;
             const day = paidAt.slice(0, 10);
             const row = byDay[day] || { orders: 0, revenue: 0 };
             row.orders += 1;
@@ -574,7 +592,7 @@
         }));
     }
 
-    function customerInsights(limit) {
+    function customerInsights(limit, basis = "sales") {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const week = new Date(today);
@@ -583,8 +601,8 @@
         const leaderRows = (start, end) => {
             const byCustomer = {};
             for (const o of DB.orders) {
-                const paidAt = new Date(o.completed_at || o.created_at);
-                if (o.status !== "paid" || paidAt < start || paidAt >= end) continue;
+                const paidAt = new Date(basisAt(o, basis));
+                if (!inBasis(o, basis) || paidAt < start || paidAt >= end) continue;
                 const customer = customerById(o.customer_id);
                 if (!customer) continue;
                 const row = byCustomer[customer.username] || { username: customer.username, orders: 0, spent: 0 };
@@ -606,12 +624,13 @@
         nextWeek.setDate(nextWeek.getDate() + 7);
         const nextMonth = new Date(month.getFullYear(), month.getMonth() + 1, 1);
         return {
+            basis,
             today: leaderRows(today, tomorrow),
             week: leaderRows(week, nextWeek),
             month: leaderRows(month, nextMonth),
-            products_today: productRows(today, tomorrow, limit),
-            products_week: productRows(week, nextWeek, limit),
-            products_month: productRows(month, nextMonth, limit),
+            products_today: productRows(today, tomorrow, limit, basis),
+            products_week: productRows(week, nextWeek, limit, basis),
+            products_month: productRows(month, nextMonth, limit, basis),
             last_paid: latest ? {
                 username: customerById(latest.customer_id)?.username || null,
                 order_id: latest.id,
@@ -621,11 +640,11 @@
         };
     }
 
-    function productRows(start, end, limit) {
+    function productRows(start, end, limit, basis = "sales") {
         const byName = {};
         for (const o of DB.orders) {
-            const paidAt = new Date(o.completed_at || o.created_at);
-            if (o.status !== "paid" || paidAt < start || paidAt >= end) continue;
+            const paidAt = new Date(basisAt(o, basis));
+            if (!inBasis(o, basis) || paidAt < start || paidAt >= end) continue;
             for (const item of o.items) {
                 const row = byName[item.product_name] || { product: item.product_name, quantity: 0, revenue: 0 };
                 row.quantity += item.quantity;
@@ -639,7 +658,98 @@
             .map((row) => ({ ...row, revenue: Math.round(row.revenue * 100) / 100 }));
     }
 
-    function reportCsvResponse() {
+    // Mirrors backend/routers/reports.py::shrinkage.
+    function shrinkageFor(period) {
+        const [start, end] = periodBounds(period);
+        const rows = new Map();
+        const byReason = {};
+        for (const a of DB.adjustments) {
+            if (a.difference === 0) continue;
+            const at = new Date(a.created_at);
+            if (start && (at < start || at >= end)) continue;
+            const row = rows.get(a.product_name) || {
+                product_id: a.product_id, product_name: a.product_name,
+                units_lost: 0, units_found: 0, value_lost: 0, counts: 0,
+            };
+            row.counts += 1;
+            if (a.difference < 0) {
+                row.units_lost += -a.difference;
+                row.value_lost += -a.difference * (a.unit_cost || 0);
+                byReason[a.reason] = (byReason[a.reason] || 0) - a.difference;
+            } else {
+                row.units_found += a.difference;
+            }
+            rows.set(a.product_name, row);
+        }
+        const products = [...rows.values()]
+            .map((r) => ({ ...r, value_lost: round2(r.value_lost) }))
+            .sort((a, b) => b.value_lost - a.value_lost || b.units_lost - a.units_lost || a.product_name.localeCompare(b.product_name));
+        return {
+            period, products, by_reason: byReason,
+            totals: {
+                units_lost: products.reduce((n, r) => n + r.units_lost, 0),
+                units_found: products.reduce((n, r) => n + r.units_found, 0),
+                value_lost: round2(products.reduce((n, r) => n + r.value_lost, 0)),
+            },
+        };
+    }
+
+    // Mirrors backend/routers/reports.py::reorder_suggestions.
+    function reorderFor(days, cover) {
+        const since = new Date(Date.now() - days * 86400000);
+        const sold = {};
+        for (const o of DB.orders) {
+            if (o.status === "cancelled" || new Date(o.created_at) < since) continue;
+            for (const it of o.items) sold[it.product_id] = (sold[it.product_id] || 0) + it.quantity;
+        }
+        const products = [];
+        for (const p of DB.products) {
+            if (!p.is_active) continue;
+            const units = sold[p.id] || 0;
+            const perDay = units / days;
+            const threshold = p.low_stock_threshold ?? 5;
+            const suggested = Math.max(0, Math.ceil(perDay * cover) + threshold - p.stock);
+            if (suggested === 0) continue;
+            products.push({
+                product_id: p.id, product_name: p.name,
+                category: DB.categories.find((c) => c.id === p.category_id)?.name || "",
+                stock: p.stock, low_stock_threshold: threshold, sold: units, per_day: round2(perDay),
+                suggested, unit_cost: p.cost_price ?? null,
+                estimated_cost: p.cost_price != null ? round2(suggested * p.cost_price) : null,
+            });
+        }
+        products.sort((a, b) => b.suggested - a.suggested || a.product_name.localeCompare(b.product_name));
+        return {
+            days, cover_days: cover, products,
+            totals: {
+                units: products.reduce((n, r) => n + r.suggested, 0),
+                estimated_cost: round2(products.reduce((n, r) => n + (r.estimated_cost || 0), 0)),
+            },
+        };
+    }
+
+    function reorderCsvResponse(data) {
+        const cell = (value) => {
+            const text = String(value ?? "");
+            const safe = typeof value === "string" && text.trimStart().match(/^[=+\-@\t\r]/) ? "'" + text : text;
+            return `"${safe.replace(/"/g, '""')}"`;
+        };
+        const rows = [["product", "category", "stock", "low_stock_threshold", `sold_last_${data.days}_days`,
+            "per_day", "order_quantity", "unit_cost", "estimated_cost"]];
+        for (const r of data.products) {
+            rows.push([r.product_name, r.category, r.stock, r.low_stock_threshold, r.sold, r.per_day,
+                r.suggested, r.unit_cost ?? "", r.estimated_cost ?? ""]);
+        }
+        rows.push(["TOTAL", "", "", "", "", "", data.totals.units, "", data.totals.estimated_cost]);
+        return new Response("\uFEFF" + rows.map((row) => row.map(cell).join(",")).join("\r\n"), {
+            headers: {
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": 'attachment; filename="kiosk-reorder-demo.csv"',
+            },
+        });
+    }
+
+    function reportCsvResponse(basis = "sales") {
         const headers = [
             "section", "period", "record", "id", "name", "count",
             "quantity", "amount", "unit_price", "stock", "stock_value", "details",
@@ -653,10 +763,10 @@
         const month = new Date(now.getFullYear(), now.getMonth(), 1);
 
         for (const period of ["today", "yesterday", "week", "month", "all_time"]) {
-            const totals = reportsSummary()[period];
+            const totals = reportsSummary(basis)[period];
             add("sales_summary", {
                 period, count: totals.order_count, amount: totals.revenue,
-                details: "paid orders and revenue",
+                details: BASIS_LABEL[basis],
             });
         }
 
@@ -707,7 +817,7 @@
         }
         for (const period of ["month", "all"]) {
             const [start, end] = periodBounds(period);
-            const report = marginsFor(start, end);
+            const report = marginsFor(start, end, basis);
             const label = period === "all" ? "all_time" : period;
             for (const row of report.products) {
                 add("margins", {
@@ -724,13 +834,13 @@
             });
         }
 
-        for (const day of salesByDay(14)) {
+        for (const day of salesByDay(14, basis)) {
             add("daily_sales", {
                 period: day.day, count: day.orders, amount: day.revenue,
-                details: "paid orders and revenue",
+                details: BASIS_LABEL[basis],
             });
         }
-        const insights = customerInsights(20);
+        const insights = customerInsights(20, basis);
         for (const period of ["today", "week", "month"]) {
             for (const [index, customer] of insights[period].entries()) {
                 add("top_customers", {
@@ -751,7 +861,7 @@
                 });
             }
         }
-        for (const [index, product] of topProducts(20).entries()) {
+        for (const [index, product] of topProducts(20, basis).entries()) {
             add("top_products", {
                 period: "all_time", record: `rank_${index + 1}`, name: product.product,
                 quantity: product.quantity, amount: product.revenue,
@@ -972,6 +1082,46 @@
         if (path === "/restocks" && method === "GET") {
             requireAdmin(init);
             return DB.restocks.slice().reverse().slice(0, Number(query.get("limit")) || 50);
+        }
+        if (path === "/inventory/counts" && method === "POST") {
+            requireAdmin(init);
+            const items = Array.isArray(body.items) ? body.items : [];
+            if (items.length === 0) throw new ApiError(HTTP.UNPROCESSABLE, "items must not be empty");
+            const reasons = ["shrinkage", "damaged", "expired", "miscount", "other"];
+            for (const it of items) {
+                if (!Number.isInteger(it.counted) || it.counted < 0) throw new ApiError(HTTP.UNPROCESSABLE, "counted must be 0 or more");
+                if (it.reason != null && !reasons.includes(it.reason)) throw new ApiError(HTTP.UNPROCESSABLE, "Invalid reason");
+            }
+            const applied = [];
+            const conflicts = [];
+            for (const it of items) {
+                const p = DB.products.find((x) => x.id === it.product_id);
+                if (!p || p.stock !== it.expected_stock) {
+                    conflicts.push({
+                        product_id: it.product_id, product_name: p ? p.name : "(deleted)",
+                        expected_stock: it.expected_stock, current_stock: p ? p.stock : null,
+                    });
+                    continue;
+                }
+                const difference = it.counted - it.expected_stock;
+                const reason = it.reason || (difference === 0 ? "match" : difference < 0 ? "shrinkage" : "miscount");
+                p.stock = it.counted;
+                const adjustment = {
+                    id: DB.nextId.adjustment++, product_id: p.id, product_name: p.name,
+                    expected: it.expected_stock, counted: it.counted, difference, reason,
+                    unit_cost: p.cost_price ?? null, note: (it.note || "").trim(),
+                    created_by: actorOf(init), created_at: fmtDT(new Date()),
+                };
+                DB.adjustments.push(adjustment);
+                audit(actorOf(init), "product.count", "product", p.id,
+                    `${p.name}: counted ${it.counted}, system ${it.expected_stock} (${difference >= 0 ? "+" : ""}${difference}, ${reason})`);
+                applied.push(adjustment);
+            }
+            return { applied, conflicts };
+        }
+        if (path === "/inventory/adjustments" && method === "GET") {
+            requireAdmin(init);
+            return DB.adjustments.slice().reverse().slice(0, Number(query.get("limit")) || 100);
         }
         if (parts.length === 3 && parts[0] === "products" && parts[2] === "image" && method === "POST") {
             requireAdmin(init);
@@ -1256,23 +1406,23 @@
 
         if (path === "/reports/summary" && method === "GET") {
             requireAdmin(init);
-            return reportsSummary();
+            return reportsSummary(basisOf(query));
         }
         if (path === "/reports/export.csv" && method === "GET") {
             requireAdmin(init);
-            return reportCsvResponse();
+            return reportCsvResponse(basisOf(query));
         }
         if (path === "/reports/top-products" && method === "GET") {
             requireAdmin(init);
-            return topProducts(Number(query.get("limit")) || 10);
+            return topProducts(Number(query.get("limit")) || 10, basisOf(query));
         }
         if (path === "/reports/customer-insights" && method === "GET") {
             requireAdmin(init);
-            return customerInsights(Math.max(1, Math.min(Number(query.get("limit")) || 5, 20)));
+            return customerInsights(Math.max(1, Math.min(Number(query.get("limit")) || 5, 20)), basisOf(query));
         }
         if (path === "/reports/sales-by-day" && method === "GET") {
             requireAdmin(init);
-            return salesByDay(Number(query.get("days")) || 14);
+            return salesByDay(Number(query.get("days")) || 14, basisOf(query));
         }
         if (path === "/reports/margins" && method === "GET") {
             requireAdmin(init);
@@ -1281,7 +1431,27 @@
                 throw new ApiError(HTTP.UNPROCESSABLE, "Invalid period");
             }
             const [start, end] = periodBounds(period);
-            return { period, ...marginsFor(start, end) };
+            const basis = basisOf(query);
+            return { period, basis, ...marginsFor(start, end, basis) };
+        }
+
+        if (path === "/reports/shrinkage" && method === "GET") {
+            requireAdmin(init);
+            const period = query.get("period") || "month";
+            if (!["today", "week", "month", "all"].includes(period)) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "Invalid period");
+            }
+            return shrinkageFor(period);
+        }
+        if ((path === "/reports/reorder" || path === "/reports/reorder.csv") && method === "GET") {
+            requireAdmin(init);
+            const days = Number(query.get("days") || 28);
+            const cover = Number(query.get("cover_days") || 14);
+            if (!(days >= 1 && days <= 365 && cover >= 1 && cover <= 180)) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "Invalid days");
+            }
+            const data = reorderFor(days, cover);
+            return path === "/reports/reorder" ? data : reorderCsvResponse(data);
         }
 
         if (path === "/audit" && method === "GET") {

@@ -6,6 +6,55 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.5.0] - 2026-11-09
+
+### Added
+- **Inventory counts and shrinkage** (admin **Inventory**). Count the shelf and enter what
+  you found; the stock is set to the count and the difference is booked with a reason
+  (missing, damaged, expired, count correction, other) instead of being silently
+  corrected. A **Shrinkage** report shows missing and extra units per product, valued at
+  the purchase price, for today/this week/this month/all time, plus a list of recent
+  counts. Each line is saved only if the system stock is still what the count sheet showed;
+  a product sold during the count is reported back to count again, so a count never wipes
+  out a sale. API: `POST /api/inventory/counts`, `GET /api/inventory/adjustments`,
+  `GET /api/reports/shrinkage?period=`; audited as `product.count`.
+- **Reorder suggestions** (admin **Reorder**). How much to order of each product so it
+  lasts the chosen number of days at the recent sales pace, on top of its low-stock
+  threshold (order = sales per day x days to cover + threshold - stock), with the estimated
+  purchase cost. Adjustable history and cover period, CSV export and a print view. API:
+  `GET /api/reports/reorder` and `/api/reports/reorder.csv`.
+- **Account statements** (admin **Customers -> Statement**). A printable statement per
+  customer for a month or all time: balance at the start, purchases with their items,
+  payments, balance at the end, and the balance to pay today with its due date.
+- Printing shows only the statement or the page content, always black on white, whatever
+  the theme.
+- **Sales figures count credit.** Top customers, top products, the sales cards, the
+  "last 14 days" chart, margins and the CSV export now count every order that is not
+  cancelled, dated when it was bought, so unpaid purchases on the tab are included. A
+  switch on the dashboard and on Reports, **All sales (incl. credit) / Paid only**, shows
+  the previous view: paid orders on the day they were paid. The choice is remembered per
+  browser. API: `basis=sales|paid` (default `sales`) on `/api/reports/summary`,
+  `/top-products`, `/customer-insights`, `/sales-by-day`, `/margins` and `/export.csv`.
+  Payment figures (outstanding balance, last payment, a customer's total paid) are
+  unchanged.
+- **`docker-compose.prebuilt.yml`**: runs the published GHCR images without cloning or
+  building (quick start in the README). CI validates the file.
+
+### Changed
+- Report endpoints default to `basis=sales` (credit included). Pass `basis=paid` for the
+  former paid-only figures.
+- The stock invariant now includes counts: stock = start + deliveries + count adjustments
+  - units in orders that are not cancelled.
+- CSV formula neutralising is shared by the report and reorder exports.
+
+### Tests
+- Backend: 88 tests (new: counts set stock and record the difference, a count never
+  overwrites a sale made during it, validation and auth, shrinkage valued at cost, reorder
+  maths and CSV, CSV formula neutralising, credit orders in top lists, sales, margins and
+  CSV on the default basis but not on `basis=paid`). E2E: 53 steps (new: count books
+  shrinkage, reorder shows the counted product and exports CSV, statement balances and
+  prints, the sales/paid switch).
+
 ## [1.4.0] - 2026-11-08
 
 ### Fixed

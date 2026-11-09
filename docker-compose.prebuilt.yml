@@ -1,0 +1,52 @@
+# Run the published images from GitHub Container Registry - nothing is built.
+# This file works on its own: download it into an empty folder and start it.
+#
+#   curl -fsSLO https://raw.githubusercontent.com/636B65/kiosk-app/main/docker-compose.prebuilt.yml
+#   printf 'SECRET_KEY=%s\nADMIN_PASSWORD=change-me-please\n' "$(openssl rand -hex 32)" > .env
+#   docker compose -f docker-compose.prebuilt.yml up -d
+#
+# Then open https://localhost (self-signed certificate) and https://localhost/#admin.
+# Data (database, PIN key, backups, product images, TLS certificate) lives in ./data.
+#
+# Pick a release with KIOSK_VERSION in .env (e.g. KIOSK_VERSION=1.5.0); the
+# default is the newest release. To update:
+#   docker compose -f docker-compose.prebuilt.yml pull
+#   docker compose -f docker-compose.prebuilt.yml up -d
+# The database is migrated automatically when the new backend starts. Back up
+# ./data first (cp -r data data.bak).
+
+services:
+  backend:
+    image: ghcr.io/636b65/kiosk/backend:${KIOSK_VERSION:-latest}
+    ports:
+      # Host loopback only: the frontend reaches the backend over Docker's
+      # internal network; the port is just for /api/health checks on the host.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/kiosk.db
+      # JWT signing key. Set a stable random value (openssl rand -hex 32), or
+      # every restart signs all admins out.
+      - SECRET_KEY=${SECRET_KEY:-}
+      # Password for the initial 'admin' account (min 8 characters). If unset, a
+      # random one is printed in the logs: docker compose logs backend
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      # Optional secret for customer PINs (>= 32 chars). If unset, a key is created
+      # once in ./data/pin_pepper.key - back that file up with the database.
+      - PIN_PEPPER=${PIN_PEPPER:-}
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/636b65/kiosk/frontend:${KIOSK_VERSION:-latest}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # A self-signed certificate is generated here on first start and never
+      # overwritten; drop in your own server.crt / server.key to replace it.
+      - ./data/tls:/etc/nginx/certs
+    depends_on:
+      - backend
+    restart: unless-stopped

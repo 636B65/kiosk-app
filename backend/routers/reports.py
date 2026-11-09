@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 from datetime import datetime, timedelta
 
 from typing import Literal
@@ -11,23 +12,48 @@ from starlette.responses import Response
 
 from database import get_db
 from due_dates import get_due_date
-from models import Customer, Order, OrderItem, Product
+from models import Customer, Order, OrderItem, Product, StockAdjustment
 from security import get_current_user
 from timeutil import utcnow
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
-def revenue_for_period(db: Session, start: datetime = None, end: datetime = None):
-    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+def csv_safe(value):
+    """Neutralise spreadsheet formulas (CSV injection) in text cells."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
+    return value
+
+
+Basis = Literal["sales", "paid"]
+BASIS_LABEL = {"sales": "all sales incl. unpaid (credit)", "paid": "paid orders only"}
+
+
+def basis_scope(basis: str):
+    """Which orders a sales statistic counts, and the date it is counted on.
+
+    "sales": every order that is not cancelled - on a tab most sales are still
+    unpaid - dated when it was bought. "paid": paid orders only, dated when
+    they were paid (the cash view).
+    """
+    if basis == "paid":
+        return Order.status == "paid", func.coalesce(Order.completed_at, Order.created_at)
+    return Order.status != "cancelled", Order.created_at
+
+
+def revenue_for_period(
+    db: Session, start: datetime = None, end: datetime = None, basis: str = "sales"
+):
+    counted, at = basis_scope(basis)
     query = db.query(
         func.count(Order.id),
         func.coalesce(func.sum(Order.total), 0.0),
-    ).filter(Order.status == "paid")
+    ).filter(counted)
     if start:
-        query = query.filter(paid_at >= start)
+        query = query.filter(at >= start)
     if end:
-        query = query.filter(paid_at < end)
+        query = query.filter(at < end)
     count, total = query.first()
     return {"order_count": count, "revenue": round(total or 0.0, 2)}
 
@@ -69,15 +95,18 @@ def low_stock_products(db: Session) -> list[dict]:
 
 
 def margins_for_period(
-    db: Session, start: datetime | None = None, end: datetime | None = None
+    db: Session,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    basis: str = "sales",
 ) -> dict:
-    """Paid sales per product with cost and margin.
+    """Sales per product with cost and margin (see basis_scope for which orders).
 
     Cost comes from the purchase price snapshotted on each order line, so
     lines sold before a cost was known count toward revenue but are left out
     of the margin (reported as ``uncosted_quantity``).
     """
-    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+    counted, at = basis_scope(basis)
     costed = OrderItem.unit_cost.isnot(None)
     line_revenue = OrderItem.unit_price * OrderItem.quantity
     query = (
@@ -97,12 +126,12 @@ def margins_for_period(
             ).label("uncosted_quantity"),
         )
         .join(Order, Order.id == OrderItem.order_id)
-        .filter(Order.status == "paid")
+        .filter(counted)
     )
     if start:
-        query = query.filter(paid_at >= start)
+        query = query.filter(at >= start)
     if end:
-        query = query.filter(paid_at < end)
+        query = query.filter(at < end)
     rows = query.group_by(OrderItem.product_name).all()
 
     def margin_row(name, quantity, revenue, costed_revenue, cost, uncosted):
@@ -159,8 +188,9 @@ def top_customers_for_period(
     start: datetime | None,
     limit: int,
     end: datetime | None = None,
+    basis: str = "sales",
 ) -> list[dict]:
-    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+    counted, at = basis_scope(basis)
     query = (
         db.query(
             Customer.username,
@@ -168,12 +198,12 @@ def top_customers_for_period(
             func.coalesce(func.sum(Order.total), 0.0).label("spent"),
         )
         .join(Order, Order.customer_id == Customer.id)
-        .filter(Order.status == "paid")
+        .filter(counted)
     )
     if start:
-        query = query.filter(paid_at >= start)
+        query = query.filter(at >= start)
     if end:
-        query = query.filter(paid_at < end)
+        query = query.filter(at < end)
     rows = (
         query.group_by(Customer.id, Customer.username)
         .order_by(
@@ -199,8 +229,9 @@ def top_products_for_period(
     start: datetime | None,
     limit: int,
     end: datetime | None = None,
+    basis: str = "sales",
 ) -> list[dict]:
-    paid_at = func.coalesce(Order.completed_at, Order.created_at)
+    counted, at = basis_scope(basis)
     query = (
         db.query(
             OrderItem.product_name,
@@ -210,7 +241,7 @@ def top_products_for_period(
             ).label("revenue"),
         )
         .join(Order, Order.id == OrderItem.order_id)
-        .filter(Order.status == "paid")
+        .filter(counted)
         .group_by(OrderItem.product_name)
         .order_by(
             func.sum(OrderItem.quantity).desc(),
@@ -219,9 +250,9 @@ def top_products_for_period(
         )
     )
     if start:
-        query = query.filter(paid_at >= start)
+        query = query.filter(at >= start)
     if end:
-        query = query.filter(paid_at < end)
+        query = query.filter(at < end)
     rows = query.limit(limit).all()
     return [
         {
@@ -236,6 +267,7 @@ def top_products_for_period(
 @router.get("/customer-insights")
 def customer_insights(
     limit: int = Query(default=5, ge=1, le=20),
+    basis: Basis = "sales",
     _: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -266,12 +298,13 @@ def customer_insights(
         .first()
     )
     return {
-        "today": top_customers_for_period(db, today, limit, tomorrow),
-        "week": top_customers_for_period(db, week, limit, next_week),
-        "month": top_customers_for_period(db, month, limit, next_month),
-        "products_today": top_products_for_period(db, today, limit, tomorrow),
-        "products_week": top_products_for_period(db, week, limit, next_week),
-        "products_month": top_products_for_period(db, month, limit, next_month),
+        "basis": basis,
+        "today": top_customers_for_period(db, today, limit, tomorrow, basis),
+        "week": top_customers_for_period(db, week, limit, next_week, basis),
+        "month": top_customers_for_period(db, month, limit, next_month, basis),
+        "products_today": top_products_for_period(db, today, limit, tomorrow, basis),
+        "products_week": top_products_for_period(db, week, limit, next_week, basis),
+        "products_month": top_products_for_period(db, month, limit, next_month, basis),
         "last_paid": (
             {
                 "username": last_paid.username,
@@ -286,7 +319,11 @@ def customer_insights(
 
 
 @router.get("/summary")
-def summary(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def summary(
+    basis: Basis = "sales",
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     now = utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week = today - timedelta(days=today.weekday())
@@ -298,39 +335,39 @@ def summary(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
         else month.replace(month=month.month + 1)
     )
     return {
-        "today": revenue_for_period(db, start=today, end=today + timedelta(days=1)),
-        "yesterday": revenue_for_period(
-            db,
-            start=today - timedelta(days=1),
-            end=today,
-        ),
-        "week": revenue_for_period(db, start=week, end=next_week),
-        "month": revenue_for_period(db, start=month, end=next_month),
-        "all_time": revenue_for_period(db),
+        "basis": basis,
+        "today": revenue_for_period(db, today, today + timedelta(days=1), basis),
+        "yesterday": revenue_for_period(db, today - timedelta(days=1), today, basis),
+        "week": revenue_for_period(db, week, next_week, basis),
+        "month": revenue_for_period(db, month, next_month, basis),
+        "all_time": revenue_for_period(db, basis=basis),
         "outstanding": outstanding_total(db),
         "pending_orders": db.query(Order).filter(Order.status == "pending").count(),
         "next_due_date": get_due_date(db),
         "low_stock_products": low_stock_products(db),
-        "margin_month": margins_for_period(db, month, next_month)["totals"],
+        "margin_month": margins_for_period(db, month, next_month, basis)["totals"],
     }
 
 
 @router.get("/margins")
 def margins(
     period: Literal["today", "week", "month", "all"] = "all",
+    basis: Basis = "sales",
     _: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     start, end = period_bounds(period, utcnow())
-    return {"period": period, **margins_for_period(db, start, end)}
+    return {"period": period, "basis": basis, **margins_for_period(db, start, end, basis)}
 
 
 @router.get("/top-products")
 def top_products(
     limit: int = 10,
+    basis: Basis = "sales",
     _: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    counted, _at = basis_scope(basis)
     rows = (
         db.query(
             OrderItem.product_name,
@@ -338,7 +375,7 @@ def top_products(
             func.sum(OrderItem.unit_price * OrderItem.quantity).label("total_rev"),
         )
         .join(Order, Order.id == OrderItem.order_id)
-        .filter(Order.status == "paid")
+        .filter(counted)
         .group_by(OrderItem.product_name)
         .order_by(func.sum(OrderItem.quantity).desc())
         .limit(limit)
@@ -357,21 +394,22 @@ def top_products(
 @router.get("/sales-by-day")
 def sales_by_day(
     days: int = 14,
+    basis: Basis = "sales",
     _: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     start = utcnow() - timedelta(days=days)
-    paid_at = func.coalesce(Order.completed_at, Order.created_at)
-    paid_day = func.date(paid_at)
+    counted, at = basis_scope(basis)
+    day = func.date(at)
     rows = (
         db.query(
-            paid_day.label("day"),
+            day.label("day"),
             func.count(Order.id),
             func.coalesce(func.sum(Order.total), 0.0),
         )
-        .filter(Order.status == "paid", paid_at >= start)
-        .group_by(paid_day)
-        .order_by(paid_day)
+        .filter(counted, at >= start)
+        .group_by(day)
+        .order_by(day)
         .all()
     )
     return [
@@ -380,7 +418,11 @@ def sales_by_day(
 
 
 @router.get("/export.csv")
-def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def export_csv(
+    basis: Basis = "sales",
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     now = utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week = today - timedelta(days=today.weekday())
@@ -440,14 +482,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
             stock_value,
             details,
         ]
-        safe_values = [
-            "'" + value
-            if isinstance(value, str)
-            and value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r"))
-            else value
-            for value in values
-        ]
-        writer.writerow(safe_values)
+        writer.writerow([csv_safe(value) for value in values])
 
     for period, start, end in (
         ("today", today, today + timedelta(days=1)),
@@ -456,13 +491,13 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
         ("last_30_days", now - timedelta(days=30), None),
         ("all_time", None, None),
     ):
-        totals = revenue_for_period(db, start=start, end=end)
+        totals = revenue_for_period(db, start, end, basis)
         write_row(
             "sales_summary",
             period=period,
             count=totals["order_count"],
             amount=totals["revenue"],
-            details="paid orders and revenue",
+            details=BASIS_LABEL[basis],
         )
 
     pending_orders = (
@@ -568,7 +603,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
 
     for period in ("month", "all"):
         start, end = period_bounds(period, now)
-        report = margins_for_period(db, start, end)
+        report = margins_for_period(db, start, end, basis)
         for row in report["products"]:
             write_row(
                 "margins",
@@ -593,17 +628,17 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
             details=f"revenue {totals['revenue']}; cost {totals['cost']}",
         )
 
-    paid_at = func.coalesce(Order.completed_at, Order.created_at)
-    paid_day = func.date(paid_at)
+    counted, at = basis_scope(basis)
+    sale_day = func.date(at)
     for day in (
         db.query(
-            paid_day.label("day"),
+            sale_day.label("day"),
             func.count(Order.id),
             func.coalesce(func.sum(Order.total), 0.0),
         )
-        .filter(Order.status == "paid", paid_at >= last_14_days)
-        .group_by(paid_day)
-        .order_by(paid_day)
+        .filter(counted, at >= last_14_days)
+        .group_by(sale_day)
+        .order_by(sale_day)
         .all()
     ):
         write_row(
@@ -611,7 +646,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
             period=day.day,
             count=day[1],
             amount=round(day[2], 2),
-            details="paid orders and revenue",
+            details=BASIS_LABEL[basis],
         )
 
     for period, start, end in (
@@ -620,7 +655,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
         ("month", month, next_month),
     ):
         for rank, customer in enumerate(
-            top_customers_for_period(db, start, 20, end), 1
+            top_customers_for_period(db, start, 20, end, basis), 1
         ):
             write_row(
                 "top_customers",
@@ -631,7 +666,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
                 amount=customer["spent"],
             )
         for rank, product in enumerate(
-            top_products_for_period(db, start, 20, end), 1
+            top_products_for_period(db, start, 20, end, basis), 1
         ):
             write_row(
                 "top_products",
@@ -641,7 +676,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
                 quantity=product["quantity"],
                 amount=product["revenue"],
             )
-    for rank, product in enumerate(top_products_for_period(db, None, 20), 1):
+    for rank, product in enumerate(top_products_for_period(db, None, 20, basis=basis), 1):
         write_row(
             "top_products",
             period="all_time",
@@ -677,6 +712,141 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
         )
 
     filename = f"kiosk-report-{now:%Y-%m-%d}.csv"
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---- Inventory: shrinkage found by counts, and what to order next.
+
+
+@router.get("/shrinkage")
+def shrinkage(
+    period: Literal["today", "week", "month", "all"] = "month",
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Units the shelf counts found missing (or extra), per product and reason.
+
+    Missing units are valued at the purchase price recorded with the count.
+    """
+    start, end = period_bounds(period, utcnow())
+    query = db.query(StockAdjustment).filter(StockAdjustment.difference != 0)
+    if start is not None:
+        query = query.filter(StockAdjustment.created_at >= start, StockAdjustment.created_at < end)
+    products: dict[str, dict] = {}
+    by_reason: dict[str, int] = {}
+    for adj in query.all():
+        row = products.setdefault(adj.product_name, {
+            "product_id": adj.product_id, "product_name": adj.product_name,
+            "units_lost": 0, "units_found": 0, "value_lost": 0.0, "counts": 0,
+        })
+        row["counts"] += 1
+        if adj.difference < 0:
+            lost = -adj.difference
+            row["units_lost"] += lost
+            row["value_lost"] += lost * (adj.unit_cost or 0)
+            by_reason[adj.reason] = by_reason.get(adj.reason, 0) + lost
+        else:
+            row["units_found"] += adj.difference
+    rows = sorted(products.values(), key=lambda r: (-r["value_lost"], -r["units_lost"], r["product_name"]))
+    for row in rows:
+        row["value_lost"] = round(row["value_lost"], 2)
+    return {
+        "period": period,
+        "products": rows,
+        "by_reason": by_reason,
+        "totals": {
+            "units_lost": sum(r["units_lost"] for r in rows),
+            "units_found": sum(r["units_found"] for r in rows),
+            "value_lost": round(sum(r["value_lost"] for r in rows), 2),
+        },
+    }
+
+
+def reorder_suggestions(db: Session, days: int, cover_days: int) -> dict:
+    """Suggest what to order: enough for `cover_days` at the pace of the last
+    `days` days, on top of each product's low-stock threshold.
+
+    suggested = ceil(sold_per_day * cover_days) + low_stock_threshold - stock
+    """
+    since = utcnow() - timedelta(days=days)
+    sold = dict(
+        db.query(OrderItem.product_id, func.sum(OrderItem.quantity))
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(Order.status != "cancelled", Order.created_at >= since)
+        .group_by(OrderItem.product_id)
+        .all()
+    )
+    rows = []
+    for product in db.query(Product).filter(Product.is_active.is_(True)).all():
+        units = int(sold.get(product.id) or 0)
+        per_day = units / days
+        threshold = product.low_stock_threshold or 0
+        stock = product.stock or 0
+        suggested = max(0, math.ceil(per_day * cover_days) + threshold - stock)
+        if suggested == 0:
+            continue
+        rows.append({
+            "product_id": product.id,
+            "product_name": product.name,
+            "category": product.category.name if product.category else "",
+            "stock": stock,
+            "low_stock_threshold": threshold,
+            "sold": units,
+            "per_day": round(per_day, 2),
+            "suggested": suggested,
+            "unit_cost": product.cost_price,
+            "estimated_cost": round(suggested * product.cost_price, 2)
+            if product.cost_price is not None else None,
+        })
+    rows.sort(key=lambda r: (-r["suggested"], r["product_name"]))
+    return {
+        "days": days,
+        "cover_days": cover_days,
+        "products": rows,
+        "totals": {
+            "units": sum(r["suggested"] for r in rows),
+            "estimated_cost": round(sum(r["estimated_cost"] or 0 for r in rows), 2),
+        },
+    }
+
+
+@router.get("/reorder")
+def reorder(
+    days: int = Query(default=28, ge=1, le=365),
+    cover_days: int = Query(default=14, ge=1, le=180),
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return reorder_suggestions(db, days, cover_days)
+
+
+@router.get("/reorder.csv")
+def reorder_csv(
+    days: int = Query(default=28, ge=1, le=365),
+    cover_days: int = Query(default=14, ge=1, le=180),
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    data = reorder_suggestions(db, days, cover_days)
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([
+        "product", "category", "stock", "low_stock_threshold", f"sold_last_{days}_days",
+        "per_day", "order_quantity", "unit_cost", "estimated_cost",
+    ])
+    for r in data["products"]:
+        writer.writerow([
+            csv_safe(r["product_name"]), csv_safe(r["category"]), r["stock"], r["low_stock_threshold"], r["sold"],
+            r["per_day"], r["suggested"],
+            "" if r["unit_cost"] is None else r["unit_cost"],
+            "" if r["estimated_cost"] is None else r["estimated_cost"],
+        ])
+    writer.writerow(["TOTAL", "", "", "", "", "", data["totals"]["units"], "", data["totals"]["estimated_cost"]])
+    filename = f"kiosk-reorder-{utcnow():%Y-%m-%d}.csv"
     return Response(
         content="\ufeff" + output.getvalue(),
         media_type="text/csv",

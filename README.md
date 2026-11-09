@@ -63,10 +63,16 @@ sample data. Everything lives in your browser and **resets on reload**.
   barcode aliases)
 - Orders with paid/cancelled statuses and per-order item detail
 - Customers: balances, per-customer stats, monthly history, reset payment
-- Reports with outstanding balance, sales breakdown, customer/product leaderboards,
+- Reports with outstanding balance, sales breakdown, customer/product leaderboards
+  (counting sales on credit by default, or paid orders only),
   recent payment insights, margins per product (today/week/month/all time, using the
   purchase price at the time of sale), and CSV export of inventory (selling and cost
   value), restock needs, margins, customer balances, and report data
+- Inventory: count the shelf, book differences with a reason (missing, damaged,
+  expired, ...) and follow shrinkage per product and period, valued at the purchase price
+- Reorder suggestions from the recent sales pace and each product's low-stock threshold,
+  with estimated cost, CSV export and print view
+- Printable account statement per customer and month (purchases, payments, balance)
 - Audit log: who marked orders paid or cancelled, reset or self-marked payments,
   changed products, prices, stock, settings or users, and took backups, and when
 - System page: backend/frontend version, uptime, database size, counts, and backups
@@ -100,6 +106,26 @@ The editable source diagram is [available in draw.io format](docs/kiosk-architec
 ## Getting started
 
 Requires Docker with the Compose plugin.
+
+### Quick start with the published images (no build)
+
+The release images on GitHub Container Registry are public, so the app runs
+without cloning or building anything. In an empty folder:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/636B65/kiosk-app/main/docker-compose.prebuilt.yml
+printf 'SECRET_KEY=%s\nADMIN_PASSWORD=change-me-please\n' "$(openssl rand -hex 32)" > .env
+docker compose -f docker-compose.prebuilt.yml up -d
+```
+
+Open https://localhost (accept the self-signed certificate) and log in at
+https://localhost/#admin as `admin` with the password from `.env`. Everything is
+stored in `./data`. Add `KIOSK_VERSION=1.5.0` to `.env` to pin a release
+(default: the newest). To update: `docker compose -f docker-compose.prebuilt.yml pull`
+and `docker compose -f docker-compose.prebuilt.yml up -d`; the database is migrated
+on start (back up `./data` first).
+
+### Build from source
 
 ```bash
 docker compose up --build

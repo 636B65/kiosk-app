@@ -16,6 +16,7 @@ from routers import (
     auth,
     categories,
     customers,
+    inventory,
     orders,
     products,
     reports,
@@ -75,6 +76,7 @@ app.include_router(reports.router)
 app.include_router(settings.router)
 app.include_router(users.router)
 app.include_router(restocks.router)
+app.include_router(inventory.router)
 app.include_router(audit_routes.router)
 app.include_router(system.router)
 

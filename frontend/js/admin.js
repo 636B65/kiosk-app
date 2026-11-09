@@ -120,6 +120,8 @@ const Admin = {
         const navItems = [
             ["dashboard", "📊", "Dashboard"],
             ["products", "📦", "Products"],
+            ["inventory", "📋", "Inventory"],
+            ["reorder", "🛒", "Reorder"],
             ["categories", "🗂️", "Categories"],
             ["orders", "🧾", "Orders"],
             ["customers", "👥", "Customers"],
@@ -163,6 +165,8 @@ const Admin = {
         switch (view) {
             case "dashboard": return this.renderDashboard();
             case "products": return this.renderProducts();
+            case "inventory": return this.renderInventory();
+            case "reorder": return this.renderReorder();
             case "categories": return this.renderCategories();
             case "orders": return this.renderOrders();
             case "customers": return this.renderCustomers();
@@ -175,22 +179,55 @@ const Admin = {
         }
     },
 
+    // Which orders the sales figures count. "sales": every order that is not
+    // cancelled, unpaid (credit) included, dated when bought; "paid": paid orders
+    // only, dated when paid. Remembered per browser.
+    reportBasis() {
+        try {
+            return localStorage.getItem("kiosk_report_basis") === "paid" ? "paid" : "sales";
+        } catch {
+            return "sales";
+        }
+    },
+
+    setReportBasis(basis) {
+        try {
+            localStorage.setItem("kiosk_report_basis", basis);
+        } catch {}
+        this.loadView(this.view);
+    },
+
+    basisToggle() {
+        const basis = this.reportBasis();
+        const option = (value, label) => `
+            <button class="btn ${basis === value ? "btn-primary" : "btn-secondary"}"
+                    data-action="admin-report-basis" data-basis="${value}">${label}</button>`;
+        return `<div class="toolbar basis-toggle" role="group" aria-label="Count">
+            ${option("sales", "All sales (incl. credit)")}${option("paid", "Paid only")}
+        </div>`;
+    },
+
     async renderDashboard() {
+        const basis = this.reportBasis();
         const [summary, topProducts] = await Promise.all([
-            API.get("/reports/summary"),
-            API.get("/reports/top-products?limit=5"),
+            API.get(`/reports/summary?basis=${basis}`),
+            API.get(`/reports/top-products?limit=5&basis=${basis}`),
         ]);
+        const word = basis === "paid" ? "paid" : "sales";
         const app = this.mainFor("dashboard");
         if (!app) return;
         app.innerHTML = `
             <div class="admin-main">
-                <h2>Dashboard</h2>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
+                    <h2 style="margin:0;">Dashboard</h2>
+                    ${this.basisToggle()}
+                </div>
                 <div class="stats-grid">
                     <div class="stat-card"><div class="label">Outstanding Balance</div><div class="value" style="color:var(--warning);">${fmt(summary.outstanding)}</div><div class="sub">${summary.pending_orders} unpaid order(s)</div></div>
-                    <div class="stat-card"><div class="label">Today's Paid</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} order(s)</div></div>
-                    <div class="stat-card"><div class="label">This Week</div><div class="value">${fmt(summary.week.revenue)}</div></div>
-                    <div class="stat-card"><div class="label">This Month</div><div class="value">${fmt(summary.month.revenue)}</div></div>
-                    <div class="stat-card"><div class="label">All-time Paid</div><div class="value">${fmt(summary.all_time.revenue)}</div></div>
+                    <div class="stat-card"><div class="label">Today's ${word}</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} order(s)</div></div>
+                    <div class="stat-card"><div class="label">This week's ${word}</div><div class="value">${fmt(summary.week.revenue)}</div></div>
+                    <div class="stat-card"><div class="label">This month's ${word}</div><div class="value">${fmt(summary.month.revenue)}</div></div>
+                    <div class="stat-card"><div class="label">All-time ${word}</div><div class="value">${fmt(summary.all_time.revenue)}</div></div>
                     <div class="stat-card"><div class="label">Margin this month</div><div class="value">${fmt(summary.margin_month.margin)}</div><div class="sub">${summary.margin_month.margin_pct != null ? `${summary.margin_month.margin_pct}% of costed sales` : "no costed sales yet"}</div></div>
                 </div>
                 <div class="panel">
@@ -773,6 +810,7 @@ const Admin = {
                                 <td style="${c.balance > 0 ? "color:var(--warning); font-weight:700;" : "color:var(--success);"}">${fmt(c.balance)}</td>
                                 <td class="table-actions">
                                     <button class="btn btn-secondary view-customer" data-username="${encodeURIComponent(c.username)}">History</button>
+                                    <button class="btn btn-secondary" data-action="admin-statement" data-username="${encodeURIComponent(c.username)}">Statement</button>
                                     ${c.balance > 0 ? `
                                         <button class="btn btn-success reset-payment" data-username="${encodeURIComponent(c.username)}">Reset payment</button>
                                     ` : ""}
@@ -905,11 +943,13 @@ const Admin = {
     },
 
     async renderReports() {
+        const basis = this.reportBasis();
+        const word = basis === "paid" ? "paid" : "sales";
         const [summary, topProducts, salesByDay, customerInsights] = await Promise.all([
-            API.get("/reports/summary"),
-            API.get("/reports/top-products?limit=10"),
-            API.get("/reports/sales-by-day?days=14"),
-            API.get("/reports/customer-insights"),
+            API.get(`/reports/summary?basis=${basis}`),
+            API.get(`/reports/top-products?limit=10&basis=${basis}`),
+            API.get(`/reports/sales-by-day?days=14&basis=${basis}`),
+            API.get(`/reports/customer-insights?basis=${basis}`),
         ]);
         const max = Math.max(...salesByDay.map((d) => d.revenue), 1);
         const revenueByDay = salesByDay.map((d) => ({
@@ -953,17 +993,20 @@ const Admin = {
             <div class="admin-main">
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
                     <h2 style="margin:0;">Reports</h2>
-                    <button class="btn btn-primary" data-action="admin-export-reports-csv">Export CSV</button>
+                    <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                        ${this.basisToggle()}
+                        <button class="btn btn-primary" data-action="admin-export-reports-csv">Export CSV</button>
+                    </div>
                 </div>
                 <div class="stats-grid">
                     <div class="stat-card"><div class="label">Outstanding Balance</div><div class="value" style="color:var(--warning);">${fmt(summary.outstanding)}</div><div class="sub">${summary.pending_orders} unpaid order(s)</div></div>
-                    <div class="stat-card"><div class="label">Today (paid)</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} orders</div></div>
-                    <div class="stat-card"><div class="label">Yesterday (paid)</div><div class="value">${fmt(summary.yesterday.revenue)}</div><div class="sub">${summary.yesterday.order_count} orders</div></div>
-                    <div class="stat-card"><div class="label">This Week (paid)</div><div class="value">${fmt(summary.week.revenue)}</div><div class="sub">${summary.week.order_count} orders</div></div>
-                    <div class="stat-card"><div class="label">This Month (paid)</div><div class="value">${fmt(summary.month.revenue)}</div><div class="sub">${summary.month.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">Today (${word})</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">Yesterday (${word})</div><div class="value">${fmt(summary.yesterday.revenue)}</div><div class="sub">${summary.yesterday.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">This Week (${word})</div><div class="value">${fmt(summary.week.revenue)}</div><div class="sub">${summary.week.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">This Month (${word})</div><div class="value">${fmt(summary.month.revenue)}</div><div class="sub">${summary.month.order_count} orders</div></div>
                 </div>
                 <div class="panel">
-                    <div class="panel-header"><h3>Revenue (last 14 days)</h3></div>
+                    <div class="panel-header"><h3>${basis === "paid" ? "Payments" : "Sales"} (last 14 days)</h3></div>
                     <div class="chart">
                         <div style="flex:1; height:160px;" class="chart-wrap">
                             ${salesByDay.map((d) => `
@@ -1020,7 +1063,7 @@ const Admin = {
         if (!panel) return;
         let report;
         try {
-            report = await API.get(`/reports/margins?period=${encodeURIComponent(period)}`);
+            report = await API.get(`/reports/margins?period=${encodeURIComponent(period)}&basis=${this.reportBasis()}`);
         } catch (err) {
             panel.innerHTML = `<p style="padding:1rem;">${esc(err.message)}</p>`;
             return;
@@ -1029,7 +1072,7 @@ const Admin = {
         const periods = [["today", "Today"], ["week", "This week"], ["month", "This month"], ["all", "All time"]];
         panel.innerHTML = `
             <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-                <h3>Margins (paid sales)</h3>
+                <h3>Margins (${this.reportBasis() === "paid" ? "paid sales" : "all sales incl. credit"})</h3>
                 <div class="toolbar" style="margin:0;">
                     ${periods.map(([key, label]) => `
                         <button class="btn ${key === period ? "btn-primary" : "btn-secondary"}" data-action="admin-margins-period" data-period="${key}">${label}</button>
@@ -1040,7 +1083,7 @@ const Admin = {
                 <thead><tr><th>Product</th><th>Units</th><th>Revenue</th><th>Cost</th><th>Margin</th><th>Margin %</th></tr></thead>
                 <tbody>
                     ${report.products.length === 0
-                        ? '<tr><td colspan="6">No paid sales in this period</td></tr>'
+                        ? '<tr><td colspan="6">No sales in this period</td></tr>'
                         : report.products.map((r) => `
                             <tr>
                                 <td>${esc(r.product)}${r.uncosted_quantity ? ` <span class="muted-note" title="Sold before a purchase price was set">(${r.uncosted_quantity} without cost)</span>` : ""}</td>
@@ -1062,7 +1105,7 @@ const Admin = {
 
     async exportReportsCsv() {
         try {
-            await API.download("/reports/export.csv", "kiosk-report.csv");
+            await API.download(`/reports/export.csv?basis=${this.reportBasis()}`, "kiosk-report.csv");
             Toast.success("Report exported as CSV");
         } catch (err) {
             Toast.error(err.message);
@@ -1079,6 +1122,348 @@ const Admin = {
         ["user.", "Users"],
         ["backup.", "Backups"],
     ],
+
+    // ---- Inventory: shelf counts and shrinkage.
+
+    adjustmentReasons: {
+        shrinkage: "Missing (shrinkage)",
+        damaged: "Damaged",
+        expired: "Expired",
+        miscount: "Count correction",
+        other: "Other",
+        match: "Matched",
+    },
+    shrinkagePeriod: "month",
+
+    async renderInventory() {
+        const [products, report, adjustments] = await Promise.all([
+            API.get("/products?active_only=false"),
+            API.get(`/reports/shrinkage?period=${this.shrinkagePeriod}`),
+            API.get("/inventory/adjustments?limit=20"),
+        ]);
+        const app = this.mainFor("inventory");
+        if (!app) return;
+        const reasonOptions = Object.entries(this.adjustmentReasons)
+            .filter(([key]) => key !== "match")
+            .map(([key, label]) => `<option value="${key}">${label}</option>`).join("");
+        const periods = [["today", "Today"], ["week", "This week"], ["month", "This month"], ["all", "All time"]];
+        app.innerHTML = `
+            <div class="admin-main">
+                <h2>Inventory</h2>
+                <p style="color:var(--muted); margin-bottom:1rem;">
+                    Count the shelf and enter what you found. Leave a row empty to skip it.
+                    The difference is booked with its reason, so missing goods show up in the
+                    shrinkage report instead of being silently corrected.
+                </p>
+                <div class="panel" id="count-panel">
+                <table>
+                    <thead><tr><th>Product</th><th>Category</th><th>System stock</th><th>Counted</th><th>Reason if different</th></tr></thead>
+                    <tbody>
+                        ${products.map((p) => `
+                            <tr data-count-row data-id="${p.id}" data-stock="${p.stock}">
+                                <td><strong>${esc(p.name)}</strong>${p.is_active ? "" : ' <span style="color:var(--muted);">(inactive)</span>'}</td>
+                                <td>${p.category ? esc(p.category.name) : "—"}</td>
+                                <td>${p.stock}</td>
+                                <td><input type="number" class="count-input" min="0" step="1" inputmode="numeric" aria-label="Counted ${esc(p.name)}" style="width:6rem;"></td>
+                                <td><select class="count-reason" aria-label="Reason for ${esc(p.name)}">
+                                    <option value="">Automatic</option>${reasonOptions}
+                                </select></td>
+                            </tr>
+                        `).join("")}
+                    </tbody>
+                </table>
+                <div class="form-actions">
+                    <button class="btn btn-primary" data-action="admin-save-count">Save count</button>
+                </div>
+                </div>
+
+                <div class="panel" id="shrinkage-panel">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                        <h3>Shrinkage</h3>
+                        <div class="toolbar">
+                            ${periods.map(([key, label]) => `
+                                <button class="btn ${this.shrinkagePeriod === key ? "btn-primary" : "btn-secondary"}"
+                                        data-action="admin-shrinkage-period" data-period="${key}">${label}</button>
+                            `).join("")}
+                        </div>
+                    </div>
+                    ${report.products.length === 0 ? '<p style="color:var(--muted);">No differences found by counts in this period.</p>' : `
+                    <table>
+                        <thead><tr><th>Product</th><th>Missing</th><th>Extra</th><th>Value lost</th><th>Counts</th></tr></thead>
+                        <tbody>
+                            ${report.products.map((r) => `
+                                <tr>
+                                    <td>${esc(r.product_name)}</td>
+                                    <td style="${r.units_lost ? "color:var(--danger); font-weight:700;" : ""}">${r.units_lost}</td>
+                                    <td>${r.units_found}</td>
+                                    <td>${fmt(r.value_lost)}</td>
+                                    <td>${r.counts}</td>
+                                </tr>
+                            `).join("")}
+                            <tr><td><strong>Total</strong></td><td><strong>${report.totals.units_lost}</strong></td>
+                                <td><strong>${report.totals.units_found}</strong></td><td><strong>${fmt(report.totals.value_lost)}</strong></td><td></td></tr>
+                        </tbody>
+                    </table>
+                    <p style="color:var(--muted); font-size:0.85rem; margin-top:0.5rem;">
+                        Missing by reason: ${Object.entries(report.by_reason).map(([k, v]) => `${esc(this.adjustmentReasons[k] || k)} ${v}`).join(" · ") || "—"}.
+                        Value at the purchase price recorded with each count.
+                    </p>`}
+                </div>
+
+                <div class="panel" id="recent-counts">
+                    <h3>Recent counts</h3>
+                    ${adjustments.length === 0 ? '<p style="color:var(--muted);">No counts yet.</p>' : `
+                    <table>
+                        <thead><tr><th>When</th><th>Product</th><th>System</th><th>Counted</th><th>Difference</th><th>Reason</th><th>By</th><th>Note</th></tr></thead>
+                        <tbody>
+                            ${adjustments.map((a) => `
+                                <tr>
+                                    <td>${new Date(a.created_at).toLocaleString()}</td>
+                                    <td>${esc(a.product_name)}</td>
+                                    <td>${a.expected}</td>
+                                    <td>${a.counted}</td>
+                                    <td style="${a.difference < 0 ? "color:var(--danger); font-weight:700;" : ""}">${a.difference > 0 ? "+" : ""}${a.difference}</td>
+                                    <td>${esc(this.adjustmentReasons[a.reason] || a.reason)}</td>
+                                    <td>${esc(a.created_by)}</td>
+                                    <td>${esc(a.note || "")}</td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>`}
+                </div>
+            </div>
+        `;
+    },
+
+    async saveCount() {
+        const items = [...document.querySelectorAll("#count-panel [data-count-row]")]
+            .map((row) => {
+                const value = row.querySelector(".count-input").value.trim();
+                if (value === "") return null;
+                const item = {
+                    product_id: parseInt(row.dataset.id),
+                    counted: parseInt(value),
+                    expected_stock: parseInt(row.dataset.stock),
+                };
+                const reason = row.querySelector(".count-reason").value;
+                if (reason) item.reason = reason;
+                return item;
+            })
+            .filter(Boolean);
+        if (items.length === 0) {
+            Toast.error("Enter the counted quantity for at least one product");
+            return;
+        }
+        if (items.some((i) => !Number.isInteger(i.counted) || i.counted < 0)) {
+            Toast.error("Counted quantities must be whole numbers, 0 or more");
+            return;
+        }
+        try {
+            const result = await API.post("/inventory/counts", { items });
+            const lost = result.applied.reduce((sum, a) => sum + Math.max(0, -a.difference), 0);
+            Toast.success(`${result.applied.length} product(s) counted${lost ? `, ${lost} missing` : ""}`);
+            for (const c of result.conflicts) {
+                Toast.error(`${c.product_name}: the stock changed to ${c.current_stock ?? "?"} during the count (sales or a delivery). Count it again.`);
+            }
+            this.renderInventory();
+        } catch (err) {
+            Toast.error(err.message);
+        }
+    },
+
+    // ---- Reorder suggestions.
+
+    reorderDays: 28,
+    reorderCover: 14,
+
+    async renderReorder() {
+        const query = `days=${this.reorderDays}&cover_days=${this.reorderCover}`;
+        const data = await API.get(`/reports/reorder?${query}`);
+        const app = this.mainFor("reorder");
+        if (!app) return;
+        app.innerHTML = `
+            <div class="admin-main">
+                <h2>Reorder suggestions</h2>
+                <p style="color:var(--muted); margin-bottom:1rem;" class="no-print">
+                    Enough to last the chosen number of days at the recent sales pace, on top of
+                    each product's low-stock threshold: order = sales per day × days to cover +
+                    threshold − stock.
+                </p>
+                <div class="toolbar no-print" style="align-items:flex-end;">
+                    <label>Sales history (days)<br>
+                        <input type="number" id="reorder-days" min="1" max="365" value="${data.days}" style="width:6rem;"></label>
+                    <label>Days to cover<br>
+                        <input type="number" id="reorder-cover" min="1" max="180" value="${data.cover_days}" style="width:6rem;"></label>
+                    <button class="btn btn-secondary" data-action="admin-reorder-update">Update</button>
+                    <button class="btn btn-secondary" data-action="admin-reorder-csv">Export CSV</button>
+                    <button class="btn btn-secondary" data-action="print-page">Print</button>
+                </div>
+                <div class="panel" id="reorder-panel">
+                    <p class="print-only">Reorder suggestions · ${esc(Store.settings.store_name || "")} ·
+                        ${new Date().toLocaleDateString()} · sales of the last ${data.days} days, ${data.cover_days} days to cover</p>
+                    ${data.products.length === 0 ? '<p style="color:var(--muted);">Nothing to order: every product covers the period.</p>' : `
+                    <table>
+                        <thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Threshold</th>
+                            <th>Sold (${data.days} d)</th><th>Per day</th><th>Order</th><th>Unit cost</th><th>Est. cost</th></tr></thead>
+                        <tbody>
+                            ${data.products.map((r) => `
+                                <tr>
+                                    <td><strong>${esc(r.product_name)}</strong></td>
+                                    <td>${esc(r.category || "—")}</td>
+                                    <td>${r.stock}</td>
+                                    <td>${r.low_stock_threshold}</td>
+                                    <td>${r.sold}</td>
+                                    <td>${r.per_day}</td>
+                                    <td><strong>${r.suggested}</strong></td>
+                                    <td>${r.unit_cost == null ? "—" : fmt(r.unit_cost)}</td>
+                                    <td>${r.estimated_cost == null ? "—" : fmt(r.estimated_cost)}</td>
+                                </tr>
+                            `).join("")}
+                            <tr><td colspan="6"><strong>Total</strong></td><td><strong>${data.totals.units}</strong></td>
+                                <td></td><td><strong>${fmt(data.totals.estimated_cost)}</strong></td></tr>
+                        </tbody>
+                    </table>`}
+                </div>
+            </div>
+        `;
+    },
+
+    updateReorder() {
+        const clamp = (id, low, high, fallback) => {
+            const value = parseInt(document.getElementById(id).value);
+            return Number.isFinite(value) ? Math.min(high, Math.max(low, value)) : fallback;
+        };
+        this.reorderDays = clamp("reorder-days", 1, 365, 28);
+        this.reorderCover = clamp("reorder-cover", 1, 180, 14);
+        this.renderReorder();
+    },
+
+    async exportReorderCsv() {
+        try {
+            await API.download(`/reports/reorder.csv?days=${this.reorderDays}&cover_days=${this.reorderCover}`, "kiosk-reorder.csv");
+            Toast.success("Reorder list exported as CSV");
+        } catch (err) {
+            Toast.error(err.message);
+        }
+    },
+
+    // ---- Printable account statement for one customer.
+
+    statementData: null,
+
+    async openStatement(username) {
+        try {
+            this.statementData = await API.get(`/customers/${encodeURIComponent(username)}?as_admin=true`);
+        } catch (err) {
+            Toast.error(err.message);
+            return;
+        }
+        const now = new Date();
+        Modal.open(this.statementHtml(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`));
+        document.querySelector("#modal-overlay .modal")?.classList.add("modal-wide");
+    },
+
+    // Months from the first order up to now, newest first ("YYYY-MM").
+    statementMonths(orders) {
+        const months = [];
+        const now = new Date();
+        const first = orders.length
+            ? new Date(Math.min(...orders.map((o) => new Date(o.created_at).getTime())))
+            : now;
+        const cursor = new Date(now.getFullYear(), now.getMonth(), 1);
+        while (cursor >= new Date(first.getFullYear(), first.getMonth(), 1)) {
+            months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+            cursor.setMonth(cursor.getMonth() - 1);
+        }
+        return months;
+    },
+
+    // Balance before the period + purchases - payments in it = balance after it.
+    // Cancelled orders never owed anything and are left out.
+    statementHtml(month) {
+        const data = this.statementData;
+        const orders = data.orders.filter((o) => o.status !== "cancelled");
+        let start = null;
+        let end = null;
+        if (month !== "all") {
+            const [year, mon] = month.split("-").map(Number);
+            start = new Date(year, mon - 1, 1);
+            end = new Date(year, mon, 1);
+        }
+        const before = (value) => start !== null && new Date(value) < start;
+        const within = (value) => (start === null || new Date(value) >= start) && (end === null || new Date(value) < end);
+        const paidAt = (o) => (o.status === "paid" && o.completed_at ? o.completed_at : null);
+        const sum = (list) => list.reduce((total, o) => total + o.total, 0);
+
+        const opening = sum(orders.filter((o) => before(o.created_at))) -
+            sum(orders.filter((o) => paidAt(o) && before(paidAt(o))));
+        const purchases = orders.filter((o) => within(o.created_at))
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        const payments = orders.filter((o) => paidAt(o) && within(paidAt(o)))
+            .sort((a, b) => new Date(paidAt(a)) - new Date(paidAt(b)));
+        const closing = opening + sum(purchases) - sum(payments);
+        const label = month === "all"
+            ? "All time"
+            : new Date(start).toLocaleDateString(undefined, { year: "numeric", month: "long" });
+        const items = (o) => o.items.map((i) => `${i.quantity} × ${esc(i.product_name)}`).join(", ");
+        const months = this.statementMonths(data.orders);
+
+        return `
+            <div class="statement">
+                <div class="statement-head">
+                    <div>
+                        <h2>Account statement</h2>
+                        <div><strong>${esc(data.customer.username)}</strong> · ${esc(label)}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <strong>${esc(Store.settings.store_name || "")}</strong><br>
+                        <span style="color:var(--muted);">Printed ${new Date().toLocaleDateString()}</span>
+                    </div>
+                </div>
+                <div class="toolbar no-print" style="margin:0.75rem 0;">
+                    <label>Period
+                        <select id="statement-month" data-action-input="admin-statement-month">
+                            ${months.map((m) => `<option value="${m}" ${m === month ? "selected" : ""}>${m}</option>`).join("")}
+                            <option value="all" ${month === "all" ? "selected" : ""}>All time</option>
+                        </select>
+                    </label>
+                </div>
+                <table class="statement-summary">
+                    <tr><td>Balance at the start of the period</td><td>${fmt(opening)}</td></tr>
+                    <tr><td>+ Purchases</td><td>${fmt(sum(purchases))}</td></tr>
+                    <tr><td>− Payments</td><td>${fmt(sum(payments))}</td></tr>
+                    <tr class="statement-total"><td>Balance at the end of the period</td><td>${fmt(closing)}</td></tr>
+                </table>
+                <h3>Purchases</h3>
+                ${purchases.length === 0 ? '<p style="color:var(--muted);">No purchases in this period.</p>' : `
+                <table>
+                    <thead><tr><th>Date</th><th>Order</th><th>Items</th><th>Amount</th></tr></thead>
+                    <tbody>${purchases.map((o) => `
+                        <tr><td>${new Date(o.created_at).toLocaleDateString()}</td><td>#${o.id}</td><td>${items(o)}</td><td>${fmt(o.total)}</td></tr>
+                    `).join("")}</tbody>
+                </table>`}
+                <h3>Payments</h3>
+                ${payments.length === 0 ? '<p style="color:var(--muted);">No payments in this period.</p>' : `
+                <table>
+                    <thead><tr><th>Date</th><th>Order</th><th>Amount</th></tr></thead>
+                    <tbody>${payments.map((o) => `
+                        <tr><td>${new Date(paidAt(o)).toLocaleDateString()}</td><td>#${o.id}</td><td>${fmt(o.total)}</td></tr>
+                    `).join("")}</tbody>
+                </table>`}
+                <p class="statement-due"><strong>Balance to pay today: ${fmt(data.balance)}</strong>
+                    ${data.stats.next_due_date ? ` · due ${new Date(data.stats.next_due_date).toLocaleDateString()}` : ""}</p>
+                <p style="color:var(--muted);">${esc(Store.settings.receipt_footer || "")}</p>
+                <div class="form-actions no-print">
+                    <button class="btn btn-secondary" data-action="modal-close">Close</button>
+                    <button class="btn btn-primary" data-action="print-page">Print</button>
+                </div>
+            </div>
+        `;
+    },
+
+    changeStatementMonth(month) {
+        if (this.statementData) Modal.fill(this.statementHtml(month));
+    },
 
     async renderAudit() {
         const app = this.mainFor("audit");
