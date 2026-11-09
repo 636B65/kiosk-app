@@ -1,0 +1,224 @@
+# GitLab CI/CD for the GitLab copy of this repository (gitlab.com, Free tier).
+#
+# GitHub is the source of truth: .github/workflows/mirror-gitlab.yml pushes
+# every branch and tag here. This pipeline mirrors the GitHub workflows:
+#   ci.yml             -> backend, e2e, docker-tls-smoke   (main and release tags)
+#   publish-images.yml -> images + release-notes + release (v* tags, which come
+#                         from GitHub's release.yml; GitLab never creates tags)
+#   pages.yml          -> pages                            (main, GitLab Pages demo)
+#   CodeQL             -> GitLab SAST + secret detection templates (Free)
+# Other branches are mirrored but not tested here (GitHub tests pull requests),
+# to keep within the Free tier's compute minutes. Setup: docs/gitlab.md.
+# Keep the jobs in lockstep with .github/workflows/ when those change.
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+stages:
+  - test
+  - build
+  - release
+  - deploy
+
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  npm_config_cache: "$CI_PROJECT_DIR/.cache/npm"
+
+# Node 24 LTS from nodejs.org (checksum verified); fails if older than 24.22.1,
+# the October 2026 security release (same rule as GitHub's ci.yml).
+.node24: &node24
+  - NODE_DIST=https://nodejs.org/dist/latest-v24.x
+  - curl -fsSL "$NODE_DIST/SHASUMS256.txt" -o /tmp/SHASUMS256.txt
+  - NODE_TAR="$(awk '/linux-x64\.tar\.xz$/ {print $2}' /tmp/SHASUMS256.txt)"
+  - curl -fsSL "$NODE_DIST/$NODE_TAR" -o "/tmp/$NODE_TAR"
+  - (cd /tmp && grep " $NODE_TAR\$" SHASUMS256.txt | sha256sum -c -)
+  - tar -xJf "/tmp/$NODE_TAR" -C /usr/local --strip-components=1
+  - node -e 'const [a,b,c]=process.versions.node.split(".").map(Number); if (a<24 || (a===24 && (b<22 || (b===22 && c<1)))) { console.error("Node " + process.version + " is older than 24.22.1 (October 2026 security release)"); process.exit(1); } console.log("Node " + process.version)'
+
+backend:
+  stage: test
+  image: python:3.12-bookworm
+  variables:
+    KIOSK_TEST_DB: /tmp/kiosk-test.db
+  cache:
+    key:
+      files: [backend/requirements-dev.txt]
+    paths: [.cache/pip]
+  script:
+    - cd backend
+    - pip install -U pip
+    - pip install -r requirements-dev.txt
+    - pytest tests -v
+
+e2e:
+  stage: test
+  image: python:3.12-bookworm
+  variables:
+    E2E_PYTHON: python
+  cache:
+    key:
+      files: [backend/requirements-dev.txt, tests/e2e/package-lock.json]
+    paths: [.cache/pip, .cache/npm]
+  before_script:
+    - *node24
+  script:
+    - pip install -U pip
+    - pip install -r backend/requirements-dev.txt
+    - cd tests/e2e
+    - npm ci
+    # Playwright's own Chromium build (matches the locked version) plus its system libraries.
+    - npx playwright install --with-deps chromium
+    - export CHROMIUM_PATH="$(node -e 'console.log(require("playwright").chromium.executablePath())')"
+    - npm test
+
+# The real Docker stack with self-signed TLS, as in GitHub's integration-tls job.
+# It runs on a docker:dind service, so it is reached as "docker", not localhost.
+docker-tls-smoke:
+  stage: test
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+    ADMIN_PASSWORD: smoke-test-password
+  before_script:
+    - apk add --no-cache bash curl jq
+  script:
+    # No APP_VERSION/GIT_COMMIT on purpose: a plain build must still stamp the
+    # CHANGELOG version and the checked-out commit (checked below).
+    - docker compose up -d --build
+    - |
+      healthy=""
+      for i in $(seq 1 60); do
+        code=$(curl -sk -o /dev/null -w "%{http_code}" https://docker/api/health || true)
+        if [ "$code" = "200" ]; then healthy=1; echo "frontend TLS healthy"; break; fi
+        sleep 3
+      done
+      [ -n "$healthy" ] || { echo "services never became healthy"; docker compose ps; exit 1; }
+    - docker compose exec -T frontend nginx -t
+    - test -f data/tls/server.crt && test -f data/tls/server.key
+    - |
+      version="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md | head -n 1)"
+      expected="{\"version\": \"$version\", \"commit\": \"$CI_COMMIT_SHA\"}"
+      front="$(curl -skf https://docker/version.json)"
+      echo "frontend: $front"
+      [ "$front" = "$expected" ] || { echo "version.json != $expected"; exit 1; }
+      token="$(curl -skf https://docker/api/auth/login -H 'Content-Type: application/json' \
+        -d "{\"username\": \"admin\", \"password\": \"$ADMIN_PASSWORD\"}" | jq -r .access_token)"
+      back="$(curl -skf https://docker/api/system/status -H "Authorization: Bearer $token" | jq -c '{version, commit}')"
+      echo "backend: $back"
+      [ "$back" = "$(echo "$expected" | jq -c .)" ] || { echo "backend release info != $expected"; exit 1; }
+      curl -skf https://docker/CHANGELOG.md | head -n 1 | grep -q '^# Changelog'
+    - |
+      code=$(curl -s -o /dev/null -w "%{http_code}" http://docker/)
+      [ "$code" = "301" ] || { echo "expected 301, got $code"; exit 1; }
+    - |
+      cp data/tls/server.crt /tmp/server.crt.before
+      cp data/tls/server.key /tmp/server.key.before
+      docker compose restart frontend
+      sleep 4
+      cmp -s /tmp/server.crt.before data/tls/server.crt || { echo "cert WAS overwritten"; exit 1; }
+      cmp -s /tmp/server.key.before data/tls/server.key || { echo "key WAS overwritten"; exit 1; }
+    # Browser smoke (CSP + rendering + admin login) from Playwright's image on the
+    # dind host network, where the stack listens on localhost.
+    - >
+      docker run --rm --network host --ipc host
+      -v "$CI_PROJECT_DIR/tests/e2e:/e2e" -w /e2e
+      -e ADMIN_PASSWORD -e SMOKE_HOST=localhost
+      mcr.microsoft.com/playwright:v1.64.1-noble
+      sh -c 'npm ci && CHROMIUM_PATH="$(node -e "console.log(require(\"playwright\").chromium.executablePath())")" node https-smoke.js'
+  after_script:
+    - docker compose down || true
+
+# ---- Release tags (pushed from GitHub) -> GitLab Container Registry + Release.
+
+images:
+  stage: build
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+  rules:
+    - if: $CI_COMMIT_TAG
+  parallel:
+    matrix:
+      - IMAGE: [backend, frontend]
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - VERSION="${CI_COMMIT_TAG#v}"
+    # Tag v1.4.0 publishes 1.4.0 + latest, like docker/metadata-action on GitHub.
+    - >
+      docker buildx build --push --platform linux/amd64
+      --build-context repo=.
+      --file "$IMAGE/Dockerfile"
+      --build-arg APP_VERSION="$VERSION"
+      --build-arg GIT_COMMIT="$CI_COMMIT_SHA"
+      --label org.opencontainers.image.source="$CI_PROJECT_URL"
+      --label org.opencontainers.image.revision="$CI_COMMIT_SHA"
+      --tag "$CI_REGISTRY_IMAGE/$IMAGE:$VERSION"
+      --tag "$CI_REGISTRY_IMAGE/$IMAGE:latest"
+      "$IMAGE"
+
+release-notes:
+  stage: build
+  image: alpine:3
+  variables:
+    GIT_DEPTH: "0"
+  rules:
+    - if: $CI_COMMIT_TAG
+  before_script:
+    - apk add --no-cache git
+  script:
+    - git fetch --tags --quiet
+    - sh scripts/release-notes.sh "$CI_COMMIT_TAG" "$CI_PROJECT_URL/-/compare" > release-notes.md
+    - cat release-notes.md
+  artifacts:
+    paths: [release-notes.md]
+
+# Stage order makes this wait for both images, so a release always has its images.
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "Creating GitLab release $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: $CI_COMMIT_TAG
+    description: ./release-notes.md
+
+# ---- GitLab Pages: the in-browser demo (demo.js is active on *.gitlab.io).
+
+pages:
+  stage: deploy
+  image: alpine:3
+  needs: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: ["frontend/**/*", "CHANGELOG.md"]
+  script:
+    - mkdir -p public
+    - cp -r frontend/. public/
+    - cp CHANGELOG.md public/CHANGELOG.md
+    - version="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
+    - |
+      printf '{"version": "%s", "commit": "%s"}\n' "${version:-dev}" "$CI_COMMIT_SHA" > public/version.json
+  artifacts:
+    paths: [public]

@@ -1,12 +1,12 @@
-// GitHub Pages demo shim: overrides fetch() with an in-memory mock of the
+// GitHub/GitLab Pages demo shim: overrides fetch() with an in-memory mock of the
 // FastAPI backend so the static frontend runs standalone as a live demo.
-// Active on *.github.io hosts or with ?demo=1; otherwise a no-op.
+// Active on *.github.io and *.gitlab.io hosts or with ?demo=1; otherwise a no-op.
 (function () {
     "use strict";
 
     const query = new URLSearchParams(window.location.search);
-    const onGitHubIo = /(^|\.)github\.io$/.test(window.location.hostname);
-    if (query.get("demo") !== "1" && !onGitHubIo) return;
+    const onPagesHost = /(^|\.)(github|gitlab)\.io$/.test(window.location.hostname);
+    if (query.get("demo") !== "1" && !onPagesHost) return;
 
     function pad(n) { return String(n).padStart(2, "0"); }
     function fmtDT(d) {

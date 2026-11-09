@@ -9,8 +9,11 @@ const { chromium } = require("playwright");
 //     strict CSP does not disable any UI interaction.
 //   - kiosk + admin still work over HTTPS
 
-const HTTP = "http://localhost/";
-const HTTPS = "https://localhost";
+// SMOKE_HOST: where the compose stack listens (GitLab CI runs it in a
+// docker:dind service reachable as "docker"; GitHub Actions on localhost).
+const SMOKE_HOST = process.env.SMOKE_HOST || "localhost";
+const HTTP = `http://${SMOKE_HOST}/`;
+const HTTPS = `https://${SMOKE_HOST}`;
 const executable = process.env.CHROMIUM_PATH || "/usr/bin/chromium";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "test-admin-password";
 

@@ -228,6 +228,14 @@ docker pull ghcr.io/636b65/kiosk/frontend:latest
 
 Note: GHCR package names are lowercase regardless of the account spelling.
 
+## GitLab mirror
+
+GitHub is the source of truth. Once it is set up, every branch and tag is mirrored to
+gitlab.com, where `.gitlab-ci.yml` runs the same tests, publishes the release images to
+the GitLab Container Registry, creates GitLab Releases and hosts the demo on GitLab
+Pages. Everything works on the GitLab Free tier. Setup takes a few minutes:
+[docs/gitlab.md](docs/gitlab.md).
+
 ## Development
 
 The backend uses FastAPI with pinned dependencies in `backend/requirements.txt`.

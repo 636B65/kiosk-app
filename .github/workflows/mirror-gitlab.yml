@@ -1,0 +1,59 @@
+name: Mirror to GitLab
+
+# GitHub is the source of truth; this pushes every branch and tag to the GitLab
+# copy (GitLab Free has no pull mirroring), where .gitlab-ci.yml runs the tests,
+# GitLab Pages and the release images. Inactive until the repository variable
+# GITLAB_REPO (e.g. "my-group/kiosk-app") and the secret GITLAB_DEPLOY_KEY (an
+# SSH private key whose public half is a GitLab deploy key with write access)
+# are set. Setup: docs/gitlab.md.
+on:
+  push:
+  delete:
+  # Release tags are pushed by release.yml with GITHUB_TOKEN, which does not
+  # trigger push workflows, so mirror again once a release finished.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-gitlab
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Push branches and tags to GitLab
+    # Dependabot runs get no secrets; the next regular run mirrors its branches.
+    if: vars.GITLAB_REPO != '' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Push to GitLab
+        env:
+          GITLAB_REPO: ${{ vars.GITLAB_REPO }}
+          DEPLOY_KEY: ${{ secrets.GITLAB_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::Secret GITLAB_DEPLOY_KEY is not set (see docs/gitlab.md)"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/gitlab && chmod 600 ~/.ssh/gitlab
+          # gitlab.com's published ED25519 host key
+          # (SHA256:eUXGGm1YGsMAS7vkcx6JOJdOGHPem5gQp4taiCfCLB8), pinned rather than keyscanned.
+          echo 'gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf' > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/gitlab -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          git fetch --prune --tags origin '+refs/heads/*:refs/remotes/origin/*'
+          git remote set-head origin --delete || true
+          git remote add gitlab "git@gitlab.com:${GITLAB_REPO}.git"
+          # Exact copy: every branch and tag, deleted ones removed, history forced
+          # to match GitHub (nobody commits on GitLab directly).
+          git push --prune --force gitlab \
+            '+refs/remotes/origin/*:refs/heads/*' \
+            '+refs/tags/*:refs/tags/*'

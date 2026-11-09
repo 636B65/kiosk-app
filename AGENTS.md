@@ -12,6 +12,12 @@ check out on a "tab" under their username, and the **staff mark orders as paid l
 - Frontend: **vanilla JS, no framework/build step** (plain `<script>` tags), served by `nginx:alpine` behind **self-signed TLS**.
 - Tests: pytest (backend) + a zero-dependency Playwright harness (e2e, uses system Chromium).
 - CI: 3 jobs — Backend API tests, End-to-end browser tests, Docker + TLS smoke (`ci.yml`).
+- GitLab: `mirror-gitlab.yml` pushes every branch and tag to gitlab.com (inactive until
+  the `GITLAB_REPO` variable and `GITLAB_DEPLOY_KEY` secret are set). There,
+  `.gitlab-ci.yml` (Free tier) mirrors `ci.yml`, `publish-images.yml` and `pages.yml`.
+  **Change both CIs together.** GitLab never creates tags; it reacts to mirrored `v*` tags.
+  Release notes come from the shared `scripts/release-notes.sh`. The Playwright image tag in
+  `docker-tls-smoke` must match `tests/e2e/package-lock.json`. Setup: `docs/gitlab.md`.
 - Releases: when CI on `main` is green and the newest `CHANGELOG.md` version has no tag yet,
   `release.yml` creates the `vX.Y.Z` tag and calls `publish-images.yml` (also run by any pushed
   `v*` tag), which builds and pushes the `ghcr.io/636b65/kiosk/backend` and `.../frontend`
@@ -71,7 +77,7 @@ frontend/
   css/             styles.css
   js/
     theme.js       Theme (Auto/Light/Dark), loaded in <head> before first paint
-    demo.js        in-browser API mock for the GitHub Pages demo (no-op unless .github.io host or ?demo=1)
+    demo.js        in-browser API mock for the Pages demos (no-op unless a .github.io/.gitlab.io host or ?demo=1)
     api.js         fetch wrapper + token storage
     app.js         entry: route handling, Store, Toast, Modal, AppInfo (footer), currency list
     customer.js    Kiosk cart/checkout + user lookup
@@ -80,9 +86,10 @@ frontend/
     debug.js       Debug panel
 scripts/
   release-info.sh  writes the version/commit JSON baked into both images
+  release-notes.sh CHANGELOG section + compare link for a tag (GitHub and GitLab releases)
 tests/e2e/
   e2e.js          main Playwright harness (npm test)
-  https-smoke.js  TLS/CSP/admin-login smoke against docker compose
+  https-smoke.js  TLS/CSP/admin-login smoke against docker compose (host from SMOKE_HOST, default localhost)
 ```
 
 ## Business rules (critical — do not change without updating tests + frontend)
@@ -223,7 +230,7 @@ tests/e2e/
 - **No build step, no JS modules.** Globals: `Theme`, `Store`, `API`, `Modal`, `Toast`, `AppInfo`, `Kiosk`,
   `Admin`, `Actions`, `Debug`. Script include order in `index.html` defines load order.
 - `demo.js` is a `<script>` hook loaded **before** `api.js`. It is a no-op unless the
-  host is `*.github.io` or the URL has `?demo=1`; in demo mode it replaces `window.fetch`
+  host is `*.github.io` / `*.gitlab.io` or the URL has `?demo=1`; in demo mode it replaces `window.fetch`
   with an in-memory mock of every endpoint the frontend calls (routes mirror
   `backend/routers/*`). `api.js` binds `const API`, so the mock must never reassign it —
   it intercepts at the `fetch` level. Keep `demo.js` in lockstep with backend routes and
