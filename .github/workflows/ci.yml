@@ -141,6 +141,9 @@ jobs:
           fi
           echo "CHROMIUM_PATH=$local_path" >> "$GITHUB_ENV"
 
+      - name: Validate the prebuilt-images example
+        run: docker compose -f docker-compose.prebuilt.yml config --quiet
+
       - name: Build and start services (generates self-signed cert)
         env:
           ADMIN_PASSWORD: smoke-test-password

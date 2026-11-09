@@ -179,22 +179,55 @@ const Admin = {
         }
     },
 
+    // Which orders the sales figures count. "sales": every order that is not
+    // cancelled, unpaid (credit) included, dated when bought; "paid": paid orders
+    // only, dated when paid. Remembered per browser.
+    reportBasis() {
+        try {
+            return localStorage.getItem("kiosk_report_basis") === "paid" ? "paid" : "sales";
+        } catch {
+            return "sales";
+        }
+    },
+
+    setReportBasis(basis) {
+        try {
+            localStorage.setItem("kiosk_report_basis", basis);
+        } catch {}
+        this.loadView(this.view);
+    },
+
+    basisToggle() {
+        const basis = this.reportBasis();
+        const option = (value, label) => `
+            <button class="btn ${basis === value ? "btn-primary" : "btn-secondary"}"
+                    data-action="admin-report-basis" data-basis="${value}">${label}</button>`;
+        return `<div class="toolbar basis-toggle" role="group" aria-label="Count">
+            ${option("sales", "All sales (incl. credit)")}${option("paid", "Paid only")}
+        </div>`;
+    },
+
     async renderDashboard() {
+        const basis = this.reportBasis();
         const [summary, topProducts] = await Promise.all([
-            API.get("/reports/summary"),
-            API.get("/reports/top-products?limit=5"),
+            API.get(`/reports/summary?basis=${basis}`),
+            API.get(`/reports/top-products?limit=5&basis=${basis}`),
         ]);
+        const word = basis === "paid" ? "paid" : "sales";
         const app = this.mainFor("dashboard");
         if (!app) return;
         app.innerHTML = `
             <div class="admin-main">
-                <h2>Dashboard</h2>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
+                    <h2 style="margin:0;">Dashboard</h2>
+                    ${this.basisToggle()}
+                </div>
                 <div class="stats-grid">
                     <div class="stat-card"><div class="label">Outstanding Balance</div><div class="value" style="color:var(--warning);">${fmt(summary.outstanding)}</div><div class="sub">${summary.pending_orders} unpaid order(s)</div></div>
-                    <div class="stat-card"><div class="label">Today's Paid</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} order(s)</div></div>
-                    <div class="stat-card"><div class="label">This Week</div><div class="value">${fmt(summary.week.revenue)}</div></div>
-                    <div class="stat-card"><div class="label">This Month</div><div class="value">${fmt(summary.month.revenue)}</div></div>
-                    <div class="stat-card"><div class="label">All-time Paid</div><div class="value">${fmt(summary.all_time.revenue)}</div></div>
+                    <div class="stat-card"><div class="label">Today's ${word}</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} order(s)</div></div>
+                    <div class="stat-card"><div class="label">This week's ${word}</div><div class="value">${fmt(summary.week.revenue)}</div></div>
+                    <div class="stat-card"><div class="label">This month's ${word}</div><div class="value">${fmt(summary.month.revenue)}</div></div>
+                    <div class="stat-card"><div class="label">All-time ${word}</div><div class="value">${fmt(summary.all_time.revenue)}</div></div>
                     <div class="stat-card"><div class="label">Margin this month</div><div class="value">${fmt(summary.margin_month.margin)}</div><div class="sub">${summary.margin_month.margin_pct != null ? `${summary.margin_month.margin_pct}% of costed sales` : "no costed sales yet"}</div></div>
                 </div>
                 <div class="panel">
@@ -910,11 +943,13 @@ const Admin = {
     },
 
     async renderReports() {
+        const basis = this.reportBasis();
+        const word = basis === "paid" ? "paid" : "sales";
         const [summary, topProducts, salesByDay, customerInsights] = await Promise.all([
-            API.get("/reports/summary"),
-            API.get("/reports/top-products?limit=10"),
-            API.get("/reports/sales-by-day?days=14"),
-            API.get("/reports/customer-insights"),
+            API.get(`/reports/summary?basis=${basis}`),
+            API.get(`/reports/top-products?limit=10&basis=${basis}`),
+            API.get(`/reports/sales-by-day?days=14&basis=${basis}`),
+            API.get(`/reports/customer-insights?basis=${basis}`),
         ]);
         const max = Math.max(...salesByDay.map((d) => d.revenue), 1);
         const revenueByDay = salesByDay.map((d) => ({
@@ -958,17 +993,20 @@ const Admin = {
             <div class="admin-main">
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
                     <h2 style="margin:0;">Reports</h2>
-                    <button class="btn btn-primary" data-action="admin-export-reports-csv">Export CSV</button>
+                    <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                        ${this.basisToggle()}
+                        <button class="btn btn-primary" data-action="admin-export-reports-csv">Export CSV</button>
+                    </div>
                 </div>
                 <div class="stats-grid">
                     <div class="stat-card"><div class="label">Outstanding Balance</div><div class="value" style="color:var(--warning);">${fmt(summary.outstanding)}</div><div class="sub">${summary.pending_orders} unpaid order(s)</div></div>
-                    <div class="stat-card"><div class="label">Today (paid)</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} orders</div></div>
-                    <div class="stat-card"><div class="label">Yesterday (paid)</div><div class="value">${fmt(summary.yesterday.revenue)}</div><div class="sub">${summary.yesterday.order_count} orders</div></div>
-                    <div class="stat-card"><div class="label">This Week (paid)</div><div class="value">${fmt(summary.week.revenue)}</div><div class="sub">${summary.week.order_count} orders</div></div>
-                    <div class="stat-card"><div class="label">This Month (paid)</div><div class="value">${fmt(summary.month.revenue)}</div><div class="sub">${summary.month.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">Today (${word})</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">Yesterday (${word})</div><div class="value">${fmt(summary.yesterday.revenue)}</div><div class="sub">${summary.yesterday.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">This Week (${word})</div><div class="value">${fmt(summary.week.revenue)}</div><div class="sub">${summary.week.order_count} orders</div></div>
+                    <div class="stat-card"><div class="label">This Month (${word})</div><div class="value">${fmt(summary.month.revenue)}</div><div class="sub">${summary.month.order_count} orders</div></div>
                 </div>
                 <div class="panel">
-                    <div class="panel-header"><h3>Revenue (last 14 days)</h3></div>
+                    <div class="panel-header"><h3>${basis === "paid" ? "Payments" : "Sales"} (last 14 days)</h3></div>
                     <div class="chart">
                         <div style="flex:1; height:160px;" class="chart-wrap">
                             ${salesByDay.map((d) => `
@@ -1025,7 +1063,7 @@ const Admin = {
         if (!panel) return;
         let report;
         try {
-            report = await API.get(`/reports/margins?period=${encodeURIComponent(period)}`);
+            report = await API.get(`/reports/margins?period=${encodeURIComponent(period)}&basis=${this.reportBasis()}`);
         } catch (err) {
             panel.innerHTML = `<p style="padding:1rem;">${esc(err.message)}</p>`;
             return;
@@ -1034,7 +1072,7 @@ const Admin = {
         const periods = [["today", "Today"], ["week", "This week"], ["month", "This month"], ["all", "All time"]];
         panel.innerHTML = `
             <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-                <h3>Margins (paid sales)</h3>
+                <h3>Margins (${this.reportBasis() === "paid" ? "paid sales" : "all sales incl. credit"})</h3>
                 <div class="toolbar" style="margin:0;">
                     ${periods.map(([key, label]) => `
                         <button class="btn ${key === period ? "btn-primary" : "btn-secondary"}" data-action="admin-margins-period" data-period="${key}">${label}</button>
@@ -1045,7 +1083,7 @@ const Admin = {
                 <thead><tr><th>Product</th><th>Units</th><th>Revenue</th><th>Cost</th><th>Margin</th><th>Margin %</th></tr></thead>
                 <tbody>
                     ${report.products.length === 0
-                        ? '<tr><td colspan="6">No paid sales in this period</td></tr>'
+                        ? '<tr><td colspan="6">No sales in this period</td></tr>'
                         : report.products.map((r) => `
                             <tr>
                                 <td>${esc(r.product)}${r.uncosted_quantity ? ` <span class="muted-note" title="Sold before a purchase price was set">(${r.uncosted_quantity} without cost)</span>` : ""}</td>
@@ -1067,7 +1105,7 @@ const Admin = {
 
     async exportReportsCsv() {
         try {
-            await API.download("/reports/export.csv", "kiosk-report.csv");
+            await API.download(`/reports/export.csv?basis=${this.reportBasis()}`, "kiosk-report.csv");
             Toast.success("Report exported as CSV");
         } catch (err) {
             Toast.error(err.message);

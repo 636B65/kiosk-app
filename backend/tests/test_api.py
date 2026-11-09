@@ -459,10 +459,14 @@ def test_admin_auth_required(client):
 
 
 def test_reports_outstanding_before_payment(client, admin_headers):
-    summ = client.get("/api/reports/summary", headers=admin_headers).json()
+    summ = client.get("/api/reports/summary?basis=paid", headers=admin_headers).json()
     assert summ["outstanding"] > 0
     assert summ["pending_orders"] >= 1
     assert summ["today"]["revenue"] == 0  # nothing paid yet
+    # Sales on credit count by default: today's unpaid purchases are sales.
+    sales = client.get("/api/reports/summary", headers=admin_headers).json()
+    assert sales["basis"] == "sales"
+    assert sales["today"]["revenue"] == pytest.approx(summ["outstanding"])
 
 
 def test_customer_insights_rank_paid_customers_and_show_latest_payment(
@@ -488,7 +492,7 @@ def test_customer_insights_rank_paid_customers_and_show_latest_payment(
         created_orders.append(paid.json())
 
     insights = client.get(
-        "/api/reports/customer-insights", headers=admin_headers
+        "/api/reports/customer-insights?basis=paid", headers=admin_headers
     ).json()
     for period in ("today", "week", "month"):
         ranked = insights[period]
@@ -585,7 +589,7 @@ def test_customer_insights_rank_by_payment_date(client, admin_headers):
         db.commit()
 
     insights = client.get(
-        "/api/reports/customer-insights?limit=20", headers=admin_headers
+        "/api/reports/customer-insights?limit=20&basis=paid", headers=admin_headers
     ).json()
     for period in ("today", "week", "month"):
         usernames = [row["username"] for row in insights[period]]
@@ -1164,10 +1168,13 @@ def test_orders_snapshot_cost_for_margin_report(client, admin_headers):
     # Changing the purchase price later must not rewrite past margins.
     client.put(f"/api/products/{product['id']}", json={"cost_price": 4.5}, headers=admin_headers)
 
-    report = client.get("/api/reports/margins?period=all", headers=admin_headers).json()
+    report = client.get("/api/reports/margins?period=all&basis=paid", headers=admin_headers).json()
     rows = {r["product"]: r for r in report["products"]}
     row = rows[product["name"]]
-    assert row["quantity"] == 2  # the pending order is not counted
+    assert row["quantity"] == 2  # paid basis: the pending order is not counted
+    sales = client.get("/api/reports/margins?period=all", headers=admin_headers).json()
+    sales_row = next(r for r in sales["products"] if r["product"] == product["name"])
+    assert (sales_row["quantity"], sales_row["margin"]) == (3, 9.0)  # credit sale counts
     assert row["revenue"] == 10.0
     assert row["cost"] == 4.0
     assert row["margin"] == 6.0
@@ -1178,11 +1185,11 @@ def test_orders_snapshot_cost_for_margin_report(client, admin_headers):
     assert no_cost["uncosted_quantity"] == 1
     assert report["totals"]["revenue"] >= 13.0
 
-    month = client.get("/api/reports/margins?period=month", headers=admin_headers).json()
+    month = client.get("/api/reports/margins?period=month&basis=paid", headers=admin_headers).json()
     assert product["name"] in {r["product"] for r in month["products"]}
     assert client.get("/api/reports/margins?period=year", headers=admin_headers).status_code == 422
     assert client.get("/api/reports/margins").status_code == 401
-    summary = client.get("/api/reports/summary", headers=admin_headers).json()
+    summary = client.get("/api/reports/summary?basis=paid", headers=admin_headers).json()
     assert summary["margin_month"]["margin"] >= 6.0
 
     # Unit cost stays private: order lines in the public lookup do not expose it.
@@ -1190,7 +1197,7 @@ def test_orders_snapshot_cost_for_margin_report(client, admin_headers):
     assert all("unit_cost" not in item for o in lookup["orders"] for item in o["items"])
     assert pending["status"] == "pending"
 
-    r = client.get("/api/reports/export.csv", headers=admin_headers)
+    r = client.get("/api/reports/export.csv?basis=paid", headers=admin_headers)
     rows = list(csv.DictReader(io.StringIO(r.text.lstrip("﻿"))))
     margins = [x for x in rows if x["section"] == "margins" and x["name"] == product["name"]]
     assert {x["period"] for x in margins} == {"month", "all_time"}
@@ -2082,3 +2089,45 @@ def test_reorder_csv_neutralises_spreadsheet_formulas(client, admin_headers):
     names = [r[0] for r in csv.reader(io.StringIO(csv_text.lstrip("﻿")))]
     assert "'=HYPERLINK(\"x\")" in names
     assert not any(n.startswith("=") for n in names)
+
+
+def test_sales_basis_counts_unpaid_credit_orders(client, admin_headers):
+    """Top lists and sales figures count credit (unpaid) orders by default."""
+    product = _new_product(client, admin_headers, price=50.0, stock=20, cost_price=10.0)
+    buyer = f"credit_buyer_{uuid.uuid4().hex[:6]}"
+    order = _buy(client, buyer, product["id"], 9)  # pending: on the tab, unpaid
+    assert order["status"] == "pending"
+
+    insights = client.get("/api/reports/customer-insights?limit=20", headers=admin_headers).json()
+    assert insights["basis"] == "sales"
+    assert buyer in [r["username"] for r in insights["today"]]
+    top_today = next(r for r in insights["products_today"] if r["product"] == product["name"])
+    assert top_today["quantity"] == 9
+    paid_only = client.get("/api/reports/customer-insights?limit=20&basis=paid", headers=admin_headers).json()
+    assert buyer not in [r["username"] for r in paid_only["today"]]
+
+    top = client.get("/api/reports/top-products?limit=50", headers=admin_headers).json()
+    assert product["name"] in [r["product"] for r in top]
+    assert product["name"] not in [
+        r["product"] for r in client.get("/api/reports/top-products?limit=50&basis=paid", headers=admin_headers).json()
+    ]
+    days = client.get("/api/reports/sales-by-day?days=1", headers=admin_headers).json()
+    assert sum(d["revenue"] for d in days) >= 450.0
+    margin = client.get("/api/reports/margins?period=today", headers=admin_headers).json()
+    row = next(r for r in margin["products"] if r["product"] == product["name"])
+    assert (row["quantity"], row["margin"]) == (9, 360.0)
+
+    # A cancelled order is not a sale on either basis.
+    client.patch(
+        f"/api/orders/{order['id']}/status?new_status=cancelled&expected_status=pending",
+        headers=admin_headers,
+    )
+    after = client.get("/api/reports/customer-insights?limit=20", headers=admin_headers).json()
+    assert buyer not in [r["username"] for r in after["today"]]
+
+    csv_rows = list(csv.DictReader(io.StringIO(
+        client.get("/api/reports/export.csv", headers=admin_headers).text.lstrip("\ufeff"))))
+    summary_rows = [x for x in csv_rows if x["section"] == "sales_summary"]
+    assert summary_rows and all("incl. unpaid" in x["details"] for x in summary_rows)
+    assert client.get("/api/reports/summary?basis=cash", headers=admin_headers).status_code == 422
+

@@ -242,11 +242,27 @@
             }));
     }
 
-    function marginsFor(start, end) {
+    // Mirrors backend/routers/reports.py::basis_scope: "sales" counts every order
+    // that is not cancelled (credit included) on its purchase date, "paid" only
+    // paid orders on their payment date.
+    function inBasis(o, basis) {
+        return basis === "paid" ? o.status === "paid" : o.status !== "cancelled";
+    }
+    function basisAt(o, basis) {
+        return basis === "paid" ? (o.completed_at || o.created_at) : o.created_at;
+    }
+    function basisOf(query) {
+        const basis = query.get("basis") || "sales";
+        if (!["sales", "paid"].includes(basis)) throw new ApiError(HTTP.UNPROCESSABLE, "Invalid basis");
+        return basis;
+    }
+    const BASIS_LABEL = { sales: "all sales incl. unpaid (credit)", paid: "paid orders only" };
+
+    function marginsFor(start, end, basis = "sales") {
         const byName = {};
         for (const o of DB.orders) {
-            if (o.status !== "paid") continue;
-            const paidAt = new Date(o.completed_at || o.created_at);
+            if (!inBasis(o, basis)) continue;
+            const paidAt = new Date(basisAt(o, basis));
             if (start && paidAt < start) continue;
             if (end && paidAt >= end) continue;
             for (const it of o.items) {
@@ -497,11 +513,11 @@
         return DB.orders.filter((o) => o.customer_id === customerId && o.status === "pending");
     }
 
-    function revenueForPeriod(start, end) {
+    function revenueForPeriod(start, end, basis = "sales") {
         let sum = 0, count = 0;
         for (const o of DB.orders) {
-            if (o.status !== "paid") continue;
-            const paidAt = o.completed_at || o.created_at;
+            if (!inBasis(o, basis)) continue;
+            const paidAt = basisAt(o, basis);
             if (start && paidAt < start) continue;
             if (end && paidAt >= end) continue;
             sum += o.total;
@@ -510,7 +526,7 @@
         return { order_count: count, revenue: Math.round(sum * 100) / 100 };
     }
 
-    function reportsSummary() {
+    function reportsSummary(basis = "sales") {
         const now = new Date();
         const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const todayStart = fmtDT(t0);
@@ -524,23 +540,24 @@
         const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         const lowStock = lowStockProducts();
         return {
-            today: revenueForPeriod(todayStart, tomorrowStart),
-            yesterday: revenueForPeriod(yStart, todayStart),
-            week: revenueForPeriod(fmtDT(weekStart), fmtDT(nextWeek)),
-            month: revenueForPeriod(fmtDT(monthStart), fmtDT(nextMonth)),
-            all_time: revenueForPeriod(),
+            basis,
+            today: revenueForPeriod(todayStart, tomorrowStart, basis),
+            yesterday: revenueForPeriod(yStart, todayStart, basis),
+            week: revenueForPeriod(fmtDT(weekStart), fmtDT(nextWeek), basis),
+            month: revenueForPeriod(fmtDT(monthStart), fmtDT(nextMonth), basis),
+            all_time: revenueForPeriod(undefined, undefined, basis),
             outstanding: Math.round(DB.orders.filter((o) => o.status === "pending").reduce((s, o) => s + o.total, 0) * 100) / 100,
             pending_orders: DB.orders.filter((o) => o.status === "pending").length,
             next_due_date: dueTime(),
             low_stock_products: lowStock,
-            margin_month: marginsFor(monthStart, nextMonth).totals,
+            margin_month: marginsFor(monthStart, nextMonth, basis).totals,
         };
     }
 
-    function topProducts(limit) {
+    function topProducts(limit, basis = "sales") {
         const byName = {};
         for (const o of DB.orders) {
-            if (o.status !== "paid") continue;
+            if (!inBasis(o, basis)) continue;
             for (const it of o.items) {
                 const row = byName[it.product_name] || { quantity: 0, revenue: 0 };
                 row.quantity += it.quantity;
@@ -558,12 +575,12 @@
             .slice(0, limit);
     }
 
-    function salesByDay(days) {
+    function salesByDay(days, basis = "sales") {
         const start = fmtDT(daysAgo(days));
         const byDay = {};
         for (const o of DB.orders) {
-            const paidAt = o.completed_at || o.created_at;
-            if (o.status !== "paid" || paidAt < start) continue;
+            const paidAt = basisAt(o, basis);
+            if (!inBasis(o, basis) || paidAt < start) continue;
             const day = paidAt.slice(0, 10);
             const row = byDay[day] || { orders: 0, revenue: 0 };
             row.orders += 1;
@@ -575,7 +592,7 @@
         }));
     }
 
-    function customerInsights(limit) {
+    function customerInsights(limit, basis = "sales") {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const week = new Date(today);
@@ -584,8 +601,8 @@
         const leaderRows = (start, end) => {
             const byCustomer = {};
             for (const o of DB.orders) {
-                const paidAt = new Date(o.completed_at || o.created_at);
-                if (o.status !== "paid" || paidAt < start || paidAt >= end) continue;
+                const paidAt = new Date(basisAt(o, basis));
+                if (!inBasis(o, basis) || paidAt < start || paidAt >= end) continue;
                 const customer = customerById(o.customer_id);
                 if (!customer) continue;
                 const row = byCustomer[customer.username] || { username: customer.username, orders: 0, spent: 0 };
@@ -607,12 +624,13 @@
         nextWeek.setDate(nextWeek.getDate() + 7);
         const nextMonth = new Date(month.getFullYear(), month.getMonth() + 1, 1);
         return {
+            basis,
             today: leaderRows(today, tomorrow),
             week: leaderRows(week, nextWeek),
             month: leaderRows(month, nextMonth),
-            products_today: productRows(today, tomorrow, limit),
-            products_week: productRows(week, nextWeek, limit),
-            products_month: productRows(month, nextMonth, limit),
+            products_today: productRows(today, tomorrow, limit, basis),
+            products_week: productRows(week, nextWeek, limit, basis),
+            products_month: productRows(month, nextMonth, limit, basis),
             last_paid: latest ? {
                 username: customerById(latest.customer_id)?.username || null,
                 order_id: latest.id,
@@ -622,11 +640,11 @@
         };
     }
 
-    function productRows(start, end, limit) {
+    function productRows(start, end, limit, basis = "sales") {
         const byName = {};
         for (const o of DB.orders) {
-            const paidAt = new Date(o.completed_at || o.created_at);
-            if (o.status !== "paid" || paidAt < start || paidAt >= end) continue;
+            const paidAt = new Date(basisAt(o, basis));
+            if (!inBasis(o, basis) || paidAt < start || paidAt >= end) continue;
             for (const item of o.items) {
                 const row = byName[item.product_name] || { product: item.product_name, quantity: 0, revenue: 0 };
                 row.quantity += item.quantity;
@@ -731,7 +749,7 @@
         });
     }
 
-    function reportCsvResponse() {
+    function reportCsvResponse(basis = "sales") {
         const headers = [
             "section", "period", "record", "id", "name", "count",
             "quantity", "amount", "unit_price", "stock", "stock_value", "details",
@@ -745,10 +763,10 @@
         const month = new Date(now.getFullYear(), now.getMonth(), 1);
 
         for (const period of ["today", "yesterday", "week", "month", "all_time"]) {
-            const totals = reportsSummary()[period];
+            const totals = reportsSummary(basis)[period];
             add("sales_summary", {
                 period, count: totals.order_count, amount: totals.revenue,
-                details: "paid orders and revenue",
+                details: BASIS_LABEL[basis],
             });
         }
 
@@ -799,7 +817,7 @@
         }
         for (const period of ["month", "all"]) {
             const [start, end] = periodBounds(period);
-            const report = marginsFor(start, end);
+            const report = marginsFor(start, end, basis);
             const label = period === "all" ? "all_time" : period;
             for (const row of report.products) {
                 add("margins", {
@@ -816,13 +834,13 @@
             });
         }
 
-        for (const day of salesByDay(14)) {
+        for (const day of salesByDay(14, basis)) {
             add("daily_sales", {
                 period: day.day, count: day.orders, amount: day.revenue,
-                details: "paid orders and revenue",
+                details: BASIS_LABEL[basis],
             });
         }
-        const insights = customerInsights(20);
+        const insights = customerInsights(20, basis);
         for (const period of ["today", "week", "month"]) {
             for (const [index, customer] of insights[period].entries()) {
                 add("top_customers", {
@@ -843,7 +861,7 @@
                 });
             }
         }
-        for (const [index, product] of topProducts(20).entries()) {
+        for (const [index, product] of topProducts(20, basis).entries()) {
             add("top_products", {
                 period: "all_time", record: `rank_${index + 1}`, name: product.product,
                 quantity: product.quantity, amount: product.revenue,
@@ -1388,23 +1406,23 @@
 
         if (path === "/reports/summary" && method === "GET") {
             requireAdmin(init);
-            return reportsSummary();
+            return reportsSummary(basisOf(query));
         }
         if (path === "/reports/export.csv" && method === "GET") {
             requireAdmin(init);
-            return reportCsvResponse();
+            return reportCsvResponse(basisOf(query));
         }
         if (path === "/reports/top-products" && method === "GET") {
             requireAdmin(init);
-            return topProducts(Number(query.get("limit")) || 10);
+            return topProducts(Number(query.get("limit")) || 10, basisOf(query));
         }
         if (path === "/reports/customer-insights" && method === "GET") {
             requireAdmin(init);
-            return customerInsights(Math.max(1, Math.min(Number(query.get("limit")) || 5, 20)));
+            return customerInsights(Math.max(1, Math.min(Number(query.get("limit")) || 5, 20)), basisOf(query));
         }
         if (path === "/reports/sales-by-day" && method === "GET") {
             requireAdmin(init);
-            return salesByDay(Number(query.get("days")) || 14);
+            return salesByDay(Number(query.get("days")) || 14, basisOf(query));
         }
         if (path === "/reports/margins" && method === "GET") {
             requireAdmin(init);
@@ -1413,7 +1431,8 @@
                 throw new ApiError(HTTP.UNPROCESSABLE, "Invalid period");
             }
             const [start, end] = periodBounds(period);
-            return { period, ...marginsFor(start, end) };
+            const basis = basisOf(query);
+            return { period, basis, ...marginsFor(start, end, basis) };
         }
 
         if (path === "/reports/shrinkage" && method === "GET") {

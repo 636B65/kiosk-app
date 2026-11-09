@@ -28,17 +28,32 @@ stay backwards compatible, **PATCH** for bug and security fixes only.
   payments, balance at the end, and the balance to pay today with its due date.
 - Printing shows only the statement or the page content, always black on white, whatever
   the theme.
+- **Sales figures count credit.** Top customers, top products, the sales cards, the
+  "last 14 days" chart, margins and the CSV export now count every order that is not
+  cancelled, dated when it was bought, so unpaid purchases on the tab are included. A
+  switch on the dashboard and on Reports, **All sales (incl. credit) / Paid only**, shows
+  the previous view: paid orders on the day they were paid. The choice is remembered per
+  browser. API: `basis=sales|paid` (default `sales`) on `/api/reports/summary`,
+  `/top-products`, `/customer-insights`, `/sales-by-day`, `/margins` and `/export.csv`.
+  Payment figures (outstanding balance, last payment, a customer's total paid) are
+  unchanged.
+- **`docker-compose.prebuilt.yml`**: runs the published GHCR images without cloning or
+  building (quick start in the README). CI validates the file.
 
 ### Changed
+- Report endpoints default to `basis=sales` (credit included). Pass `basis=paid` for the
+  former paid-only figures.
 - The stock invariant now includes counts: stock = start + deliveries + count adjustments
   - units in orders that are not cancelled.
 - CSV formula neutralising is shared by the report and reorder exports.
 
 ### Tests
-- Backend: 87 tests (new: counts set stock and record the difference, a count never
+- Backend: 88 tests (new: counts set stock and record the difference, a count never
   overwrites a sale made during it, validation and auth, shrinkage valued at cost, reorder
-  maths and CSV, CSV formula neutralising). E2E: 52 steps (new: count books shrinkage,
-  reorder shows the counted product and exports CSV, statement balances and prints).
+  maths and CSV, CSV formula neutralising, credit orders in top lists, sales, margins and
+  CSV on the default basis but not on `basis=paid`). E2E: 53 steps (new: count books
+  shrinkage, reorder shows the counted product and exports CSV, statement balances and
+  prints, the sales/paid switch).
 
 ## [1.4.0] - 2026-11-08
 

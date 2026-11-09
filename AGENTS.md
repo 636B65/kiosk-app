@@ -36,6 +36,8 @@ node --check frontend/js/*.js
 cd tests/e2e && npm ci
 CHROMIUM_PATH=/usr/bin/chromium E2E_PYTHON=python3.12 npm test
 
+# Run the published images without building: docker-compose.prebuilt.yml (README quick start)
+
 # Full stack with TLS (self-signed cert generated into data/tls/ on first boot)
 docker compose up -d --build
 curl -sk https://localhost/api/health
@@ -129,7 +131,14 @@ tests/e2e/
   unless a valid admin token is sent (`get_optional_user`). Orders snapshot the cost
   into `OrderItem.unit_cost` (never exposed in order/lookup schemas).
   `GET /api/reports/margins?period=today|week|month|all` reports revenue, cost and
-  margin of paid lines; lines without a cost count as revenue but not toward margin.
+  margin of the lines on the chosen basis (below); lines without a cost count as revenue
+  but not toward margin.
+- **Report basis** (`reports.py::basis_scope`, mirrored in `demo.js`): sales statistics
+  (summary cards, top customers/products, sales-by-day, margins, CSV) take
+  `basis=sales|paid`, default **sales** = every order that is not cancelled, unpaid credit
+  included, dated by `created_at`; **paid** = paid orders dated by `completed_at`. The
+  admin switch stores the choice in `localStorage["kiosk_report_basis"]`. Payment figures
+  (outstanding, last payment, a customer's total paid) are always about payments.
 - **Restocks**: `POST /api/products/{id}/restock` (admin; quantity 1..100000, optional
   `unit_cost` which also becomes the product's `cost_price`, note) adds stock and logs a
   `Restock` row; history via `GET /api/products/{id}/restocks` and `GET /api/restocks`.

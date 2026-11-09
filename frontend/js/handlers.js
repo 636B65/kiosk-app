@@ -47,6 +47,7 @@ Actions.register("admin-reorder-csv", () => Admin.exportReorderCsv());
 Actions.register("admin-statement", (el) => Admin.openStatement(decodeURIComponent(el.dataset.username)));
 Actions.register("admin-statement-month", (el) => Admin.changeStatementMonth(el.value));
 Actions.register("print-page", () => window.print());
+Actions.register("admin-report-basis", (el) => Admin.setReportBasis(el.dataset.basis));
 
 Actions.register("kiosk-new-order", () => {
     Modal.close();

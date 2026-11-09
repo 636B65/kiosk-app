@@ -549,6 +549,23 @@ server.listen(PORT, async () => {
       return "reports ok";
     });
 
+    await step("admin: reports count credit sales by default and can show paid only", async () => {
+      const money = async (label) => {
+        const text = await page.locator(".stat-card", { hasText: label }).locator(".value").textContent();
+        return Number(text.replace(/[^0-9,.-]/g, "").replace(",", "."));
+      };
+      const sales = await money("Today (sales)");
+      await page.locator('[data-action="admin-report-basis"][data-basis="paid"]').click();
+      await page.waitForSelector(".stat-card:has-text('Today (paid)')");
+      const paid = await money("Today (paid)");
+      if (sales < paid) throw new Error(`sales ${sales} < paid ${paid}`);
+      const remembered = await page.evaluate(() => localStorage.getItem("kiosk_report_basis"));
+      if (remembered !== "paid") throw new Error("basis not remembered: " + remembered);
+      await page.locator('[data-action="admin-report-basis"][data-basis="sales"]').click();
+      await page.waitForSelector(".stat-card:has-text('Today (sales)')");
+      return `today: ${sales} in sales (credit included), ${paid} paid`;
+    });
+
     await step("admin: export report statistics as CSV", async () => {
       const downloadPromise = page.waitForEvent("download");
       await page.locator('[data-action="admin-export-reports-csv"]').click();
@@ -824,7 +841,7 @@ server.listen(PORT, async () => {
       return `starts ${tomorrow}; inactive and cost hidden for the kiosk`;
     });
 
-    await step("admin: margins panel reports paid sales against cost", async () => {
+    await step("admin: margins panel reports sales against cost", async () => {
       await adminView("reports", "#margins-panel table");
       await page.locator('#margins-panel [data-period="all"]').click();
       await page.waitForSelector('#margins-panel [data-period="all"].btn-primary');
