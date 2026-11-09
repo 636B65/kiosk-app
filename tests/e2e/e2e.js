@@ -873,6 +873,66 @@ server.listen(PORT, async () => {
       return "idle 90 s, backup every 24 h, keep 7, self-scanning off";
     });
 
+    // ---- 1.5.0: inventory counts, reorder suggestions, statements ----
+    const apiAsAdmin = (path) => page.evaluate(
+      (p) => fetch("/api" + p, { headers: { Authorization: "Bearer " + localStorage.getItem("kiosk_token") } }).then((r) => r.json()),
+      path
+    );
+
+    await step("admin: inventory count books missing goods as shrinkage", async () => {
+      await adminView("inventory", "#count-panel");
+      const row = page.locator("#count-panel tr[data-count-row]").filter({
+        has: page.locator("td:first-child", { hasText: /^\s*Baseball Cap\b/ }),
+      });
+      const system = Number(await row.getAttribute("data-stock"));
+      await row.locator(".count-input").fill(String(system - 8));
+      await row.locator(".count-reason").selectOption("damaged");
+      await page.locator('[data-action="admin-save-count"]').click();
+      await page.waitForSelector("#recent-counts tr:has-text('Baseball Cap')", { timeout: 7000 });
+      const recent = (await page.locator("#recent-counts tr", { hasText: "Baseball Cap" }).first().textContent()).replace(/\s+/g, " ");
+      if (!recent.includes("-8") || !recent.includes("Damaged")) throw new Error("recent counts: " + recent);
+      const shrink = (await page.locator("#shrinkage-panel tr", { hasText: "Baseball Cap" }).textContent()).replace(/\s+/g, " ");
+      if (!/Baseball Cap 8 /.test(shrink)) throw new Error("shrinkage row: " + shrink);
+      const products = await apiAsAdmin("/products?active_only=false");
+      const stock = products.find((p) => p.name === "Baseball Cap").stock;
+      if (stock !== system - 8) throw new Error(`stock ${stock}, expected ${system - 8}`);
+      return `Baseball Cap ${system} -> ${stock}, 8 missing (damaged)`;
+    });
+
+    await step("admin: reorder suggests what to order and exports CSV", async () => {
+      await adminView("reorder", "#reorder-panel");
+      const api = await apiAsAdmin("/reports/reorder?days=28&cover_days=14");
+      const cap = api.products.find((p) => p.product_name === "Baseball Cap");
+      if (!cap) throw new Error("Baseball Cap below its threshold but not suggested");
+      const row = (await page.locator("#reorder-panel tr", { hasText: "Baseball Cap" }).textContent()).replace(/\s+/g, " ");
+      if (!row.includes(` ${cap.suggested} `)) throw new Error(`row "${row}" lacks order quantity ${cap.suggested}`);
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        page.locator('[data-action="admin-reorder-csv"]').click(),
+      ]);
+      const csv = fs.readFileSync(await download.path(), "utf8");
+      if (!csv.includes("order_quantity") || !csv.includes("Baseball Cap")) throw new Error("CSV: " + csv.slice(0, 200));
+      return `${api.products.length} product(s) to order; Baseball Cap ${cap.suggested}; CSV ok`;
+    });
+
+    await step("admin: statement for a customer balances and prints", async () => {
+      await adminView("customers", "[data-action='admin-statement']");
+      await page.locator('[data-action="admin-statement"][data-username="alice"]').click();
+      await page.waitForSelector(".statement");
+      await page.locator("#statement-month").selectOption("all");
+      await page.waitForFunction(() => document.querySelector(".statement")?.textContent.includes("All time"));
+      const closing = (await page.locator(".statement-total td:last-child").textContent()).replace(/\s+/g, " ").trim();
+      const due = (await page.locator(".statement-due").textContent()).replace(/\s+/g, " ");
+      if (!due.includes(closing)) throw new Error(`closing ${closing} vs "${due}"`);
+      const purchases = await page.locator(".statement table:has(th:has-text('Items')) tbody tr").count();
+      if (purchases < 1) throw new Error("no purchases listed");
+      await page.evaluate(() => { window.__printed = false; window.print = () => { window.__printed = true; }; });
+      await page.locator('.statement [data-action="print-page"]').click();
+      if (!(await page.evaluate(() => window.__printed))) throw new Error("Print did not open the print dialog");
+      await page.keyboard.press("Escape");
+      return `alice: ${purchases} purchase(s), balance ${closing}, print triggered`;
+    });
+
     // ---- 1.1.0: focus, Esc, customer PINs ----
     const activeId = () => page.evaluate(() => document.activeElement?.id || "");
     const buyFirstProduct = async (username) => {

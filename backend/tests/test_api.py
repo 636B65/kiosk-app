@@ -1806,7 +1806,8 @@ def test_admin_resets_a_pin_only_when_nothing_is_owed(client, products, admin_he
 
 
 # ---- Stock consistency: the stock must only move with real sales and deliveries.
-# Invariant: stock == start + deliveries - units in orders that are not cancelled.
+# Invariant: stock == start + deliveries + count adjustments - units in orders that
+# are not cancelled.
 
 
 def _expected_stock(product_id, start):
@@ -1824,9 +1825,12 @@ def _expected_stock(product_id, start):
         delivered = db.execute(text(
             "SELECT COALESCE(SUM(quantity), 0) FROM restocks WHERE product_id = :p"
         ), {"p": product_id}).scalar()
+        counted = db.execute(text(
+            "SELECT COALESCE(SUM(difference), 0) FROM stock_adjustments WHERE product_id = :p"
+        ), {"p": product_id}).scalar()
     finally:
         db.close()
-    return start + delivered - sold
+    return start + delivered + counted - sold
 
 
 def _stock(client, product_id):
@@ -1968,3 +1972,113 @@ def test_simultaneous_first_purchases_of_a_new_customer_both_succeed(client, adm
     assert [r.status_code for r in results] == [201, 201]
     assert len(client.get(f"/api/customers/{user}").json()["orders"]) == 2
     assert _stock(client, pid) == 8 == _expected_stock(pid, 10)
+
+
+# ---- Inventory counts, shrinkage and reorder suggestions.
+
+
+def _count(client, headers, *items):
+    r = client.post("/api/inventory/counts", json={"items": list(items)}, headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_inventory_count_sets_stock_and_records_the_difference(client, admin_headers):
+    product = _new_product(client, admin_headers, stock=20, cost_price=1.5)
+    pid = product["id"]
+    _buy(client, f"count_{uuid.uuid4().hex[:6]}", pid, 2)  # system now says 18
+
+    result = _count(client, admin_headers, {
+        "product_id": pid, "counted": 15, "expected_stock": 18, "note": "shelf count",
+    })
+    assert result["conflicts"] == []
+    (adj,) = result["applied"]
+    assert (adj["expected"], adj["counted"], adj["difference"], adj["reason"]) == (18, 15, -3, "shrinkage")
+    assert adj["unit_cost"] == 1.5 and adj["created_by"] == "admin"
+    assert _stock(client, pid) == 15 == _expected_stock(pid, 20)
+
+    # A surplus defaults to "miscount", an exact match is recorded as "match".
+    assert _count(client, admin_headers, {"product_id": pid, "counted": 16, "expected_stock": 15})["applied"][0]["reason"] == "miscount"
+    assert _count(client, admin_headers, {"product_id": pid, "counted": 16, "expected_stock": 16})["applied"][0]["reason"] == "match"
+
+    latest = client.get("/api/inventory/adjustments?limit=3", headers=admin_headers).json()
+    assert [a["difference"] for a in latest] == [0, 1, -3]
+    details = [e["details"] for e in client.get("/api/audit?action=product.count", headers=admin_headers).json()]
+    assert any("counted 15, system 18 (-3, shrinkage)" in d for d in details)
+
+
+def test_inventory_count_never_overwrites_a_sale_made_during_the_count(client, admin_headers):
+    a = _new_product(client, admin_headers, stock=10)["id"]
+    b = _new_product(client, admin_headers, stock=10)["id"]
+    _buy(client, f"count_race_{uuid.uuid4().hex[:6]}", a)  # sold while the sheet said 10
+    result = _count(
+        client, admin_headers,
+        {"product_id": a, "counted": 7, "expected_stock": 10},
+        {"product_id": b, "counted": 8, "expected_stock": 10, "reason": "damaged"},
+    )
+    assert result["conflicts"] == [
+        {"product_id": a, "product_name": result["conflicts"][0]["product_name"],
+         "expected_stock": 10, "current_stock": 9}
+    ]
+    assert [x["product_id"] for x in result["applied"]] == [b]
+    assert _stock(client, a) == 9 == _expected_stock(a, 10)
+    assert _stock(client, b) == 8 == _expected_stock(b, 10)
+
+
+def test_inventory_count_validation_and_auth(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=5)["id"]
+    item = {"product_id": pid, "counted": 4, "expected_stock": 5}
+    assert client.post("/api/inventory/counts", json={"items": [item]}).status_code == 401
+    for bad in ({**item, "counted": -1}, {**item, "reason": "stolen-by-aliens"}):
+        r = client.post("/api/inventory/counts", json={"items": [bad]}, headers=admin_headers)
+        assert r.status_code == 422
+    assert client.post("/api/inventory/counts", json={"items": []}, headers=admin_headers).status_code == 422
+    missing = _count(client, admin_headers, {"product_id": 999999, "counted": 1, "expected_stock": 1})
+    assert missing["applied"] == [] and missing["conflicts"][0]["current_stock"] is None
+    assert _stock(client, pid) == 5
+
+
+def test_shrinkage_report_values_missing_units_at_cost(client, admin_headers):
+    before = client.get("/api/reports/shrinkage?period=all", headers=admin_headers).json()["totals"]
+    pid = _new_product(client, admin_headers, stock=30, cost_price=2.0)["id"]
+    _count(client, admin_headers, {"product_id": pid, "counted": 26, "expected_stock": 30, "reason": "expired"})
+    _count(client, admin_headers, {"product_id": pid, "counted": 27, "expected_stock": 26})
+    report = client.get("/api/reports/shrinkage?period=month", headers=admin_headers).json()
+    row = next(r for r in report["products"] if r["product_id"] == pid)
+    assert (row["units_lost"], row["units_found"], row["value_lost"], row["counts"]) == (4, 1, 8.0, 2)
+    assert report["by_reason"]["expired"] >= 4
+    after = client.get("/api/reports/shrinkage?period=all", headers=admin_headers).json()["totals"]
+    assert after["units_lost"] - before["units_lost"] == 4
+    assert after["value_lost"] - before["value_lost"] == 8.0
+    assert client.get("/api/reports/shrinkage?period=decade", headers=admin_headers).status_code == 422
+
+
+def test_reorder_suggests_enough_for_the_cover_period(client, admin_headers):
+    pid = _new_product(client, admin_headers, stock=40, low_stock_threshold=3, cost_price=0.5)["id"]
+    for _ in range(4):
+        _buy(client, f"reorder_{uuid.uuid4().hex[:6]}", pid, 7)  # 28 sold -> 12 left
+    data = client.get("/api/reports/reorder?days=28&cover_days=14", headers=admin_headers).json()
+    row = next(r for r in data["products"] if r["product_id"] == pid)
+    # 28 sold in 28 days = 1/day; 14 days of cover + threshold 3 - stock 12 = 5.
+    assert (row["sold"], row["per_day"], row["stock"], row["suggested"]) == (28, 1.0, 12, 5)
+    assert row["estimated_cost"] == 2.5
+
+    # Well stocked and not selling: no suggestion.
+    idle = _new_product(client, admin_headers, stock=100, low_stock_threshold=3)["id"]
+    assert idle not in [r["product_id"] for r in data["products"]]
+
+    csv_text = client.get("/api/reports/reorder.csv?days=28&cover_days=14", headers=admin_headers).text
+    rows = list(csv.reader(io.StringIO(csv_text.lstrip("\ufeff"))))
+    assert rows[0][6] == "order_quantity"
+    assert any(r[6] == "5" and r[8] == "2.5" for r in rows[1:])
+    assert rows[-1][0] == "TOTAL"
+    assert client.get("/api/reports/reorder?days=0", headers=admin_headers).status_code == 422
+
+
+
+def test_reorder_csv_neutralises_spreadsheet_formulas(client, admin_headers):
+    _new_product(client, admin_headers, name="=HYPERLINK(\"x\")", stock=0, low_stock_threshold=2)
+    csv_text = client.get("/api/reports/reorder.csv", headers=admin_headers).text
+    names = [r[0] for r in csv.reader(io.StringIO(csv_text.lstrip("﻿")))]
+    assert "'=HYPERLINK(\"x\")" in names
+    assert not any(n.startswith("=") for n in names)

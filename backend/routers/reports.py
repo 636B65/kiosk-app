@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 from datetime import datetime, timedelta
 
 from typing import Literal
@@ -11,11 +12,18 @@ from starlette.responses import Response
 
 from database import get_db
 from due_dates import get_due_date
-from models import Customer, Order, OrderItem, Product
+from models import Customer, Order, OrderItem, Product, StockAdjustment
 from security import get_current_user
 from timeutil import utcnow
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
+
+
+def csv_safe(value):
+    """Neutralise spreadsheet formulas (CSV injection) in text cells."""
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
+    return value
 
 
 def revenue_for_period(db: Session, start: datetime = None, end: datetime = None):
@@ -440,14 +448,7 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
             stock_value,
             details,
         ]
-        safe_values = [
-            "'" + value
-            if isinstance(value, str)
-            and value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r"))
-            else value
-            for value in values
-        ]
-        writer.writerow(safe_values)
+        writer.writerow([csv_safe(value) for value in values])
 
     for period, start, end in (
         ("today", today, today + timedelta(days=1)),
@@ -677,6 +678,141 @@ def export_csv(_: dict = Depends(get_current_user), db: Session = Depends(get_db
         )
 
     filename = f"kiosk-report-{now:%Y-%m-%d}.csv"
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---- Inventory: shrinkage found by counts, and what to order next.
+
+
+@router.get("/shrinkage")
+def shrinkage(
+    period: Literal["today", "week", "month", "all"] = "month",
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Units the shelf counts found missing (or extra), per product and reason.
+
+    Missing units are valued at the purchase price recorded with the count.
+    """
+    start, end = period_bounds(period, utcnow())
+    query = db.query(StockAdjustment).filter(StockAdjustment.difference != 0)
+    if start is not None:
+        query = query.filter(StockAdjustment.created_at >= start, StockAdjustment.created_at < end)
+    products: dict[str, dict] = {}
+    by_reason: dict[str, int] = {}
+    for adj in query.all():
+        row = products.setdefault(adj.product_name, {
+            "product_id": adj.product_id, "product_name": adj.product_name,
+            "units_lost": 0, "units_found": 0, "value_lost": 0.0, "counts": 0,
+        })
+        row["counts"] += 1
+        if adj.difference < 0:
+            lost = -adj.difference
+            row["units_lost"] += lost
+            row["value_lost"] += lost * (adj.unit_cost or 0)
+            by_reason[adj.reason] = by_reason.get(adj.reason, 0) + lost
+        else:
+            row["units_found"] += adj.difference
+    rows = sorted(products.values(), key=lambda r: (-r["value_lost"], -r["units_lost"], r["product_name"]))
+    for row in rows:
+        row["value_lost"] = round(row["value_lost"], 2)
+    return {
+        "period": period,
+        "products": rows,
+        "by_reason": by_reason,
+        "totals": {
+            "units_lost": sum(r["units_lost"] for r in rows),
+            "units_found": sum(r["units_found"] for r in rows),
+            "value_lost": round(sum(r["value_lost"] for r in rows), 2),
+        },
+    }
+
+
+def reorder_suggestions(db: Session, days: int, cover_days: int) -> dict:
+    """Suggest what to order: enough for `cover_days` at the pace of the last
+    `days` days, on top of each product's low-stock threshold.
+
+    suggested = ceil(sold_per_day * cover_days) + low_stock_threshold - stock
+    """
+    since = utcnow() - timedelta(days=days)
+    sold = dict(
+        db.query(OrderItem.product_id, func.sum(OrderItem.quantity))
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(Order.status != "cancelled", Order.created_at >= since)
+        .group_by(OrderItem.product_id)
+        .all()
+    )
+    rows = []
+    for product in db.query(Product).filter(Product.is_active.is_(True)).all():
+        units = int(sold.get(product.id) or 0)
+        per_day = units / days
+        threshold = product.low_stock_threshold or 0
+        stock = product.stock or 0
+        suggested = max(0, math.ceil(per_day * cover_days) + threshold - stock)
+        if suggested == 0:
+            continue
+        rows.append({
+            "product_id": product.id,
+            "product_name": product.name,
+            "category": product.category.name if product.category else "",
+            "stock": stock,
+            "low_stock_threshold": threshold,
+            "sold": units,
+            "per_day": round(per_day, 2),
+            "suggested": suggested,
+            "unit_cost": product.cost_price,
+            "estimated_cost": round(suggested * product.cost_price, 2)
+            if product.cost_price is not None else None,
+        })
+    rows.sort(key=lambda r: (-r["suggested"], r["product_name"]))
+    return {
+        "days": days,
+        "cover_days": cover_days,
+        "products": rows,
+        "totals": {
+            "units": sum(r["suggested"] for r in rows),
+            "estimated_cost": round(sum(r["estimated_cost"] or 0 for r in rows), 2),
+        },
+    }
+
+
+@router.get("/reorder")
+def reorder(
+    days: int = Query(default=28, ge=1, le=365),
+    cover_days: int = Query(default=14, ge=1, le=180),
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return reorder_suggestions(db, days, cover_days)
+
+
+@router.get("/reorder.csv")
+def reorder_csv(
+    days: int = Query(default=28, ge=1, le=365),
+    cover_days: int = Query(default=14, ge=1, le=180),
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    data = reorder_suggestions(db, days, cover_days)
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow([
+        "product", "category", "stock", "low_stock_threshold", f"sold_last_{days}_days",
+        "per_day", "order_quantity", "unit_cost", "estimated_cost",
+    ])
+    for r in data["products"]:
+        writer.writerow([
+            csv_safe(r["product_name"]), csv_safe(r["category"]), r["stock"], r["low_stock_threshold"], r["sold"],
+            r["per_day"], r["suggested"],
+            "" if r["unit_cost"] is None else r["unit_cost"],
+            "" if r["estimated_cost"] is None else r["estimated_cost"],
+        ])
+    writer.writerow(["TOTAL", "", "", "", "", "", data["totals"]["units"], "", data["totals"]["estimated_cost"]])
+    filename = f"kiosk-reorder-{utcnow():%Y-%m-%d}.csv"
     return Response(
         content="\ufeff" + output.getvalue(),
         media_type="text/csv",

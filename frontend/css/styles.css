@@ -1298,3 +1298,107 @@ tfoot th { text-align: left; border-top: 2px solid var(--border); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .link-btn { background: none; border: none; padding: 0; color: var(--primary); font-size: 0.85rem; text-decoration: underline; align-self: flex-start; }
 .pin-forgot-help { font-size: 0.85rem; color: var(--text); background: var(--bg); border-left: 3px solid var(--warning); padding: 0.5rem 0.75rem; border-radius: 6px; margin: 0; }
+
+/* ---- Account statement (Customers -> Statement) */
+
+.statement-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.statement h3 {
+    margin: 1.25rem 0 0.5rem;
+}
+
+.statement-summary {
+    margin-top: 0.5rem;
+    max-width: 28rem;
+}
+
+.statement-summary td:last-child {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.statement-total td {
+    font-weight: 700;
+    border-top: 2px solid var(--text);
+}
+
+.statement-due {
+    margin-top: 1rem;
+}
+
+.print-only {
+    display: none;
+}
+
+/* ---- Printing: only the open dialog (statement) or the admin page content,
+   always in the light palette whatever the theme, so prints are black on white. */
+
+@media print {
+    :root:not(#print) {
+        color-scheme: light;
+        --bg: #ffffff;
+        --card: #ffffff;
+        --surface-2: #ffffff;
+        --text: #000000;
+        --muted: #475569;
+        --border: #cbd5e1;
+        --primary-dark: #1d4ed8;
+        --danger: #b91c1c;
+        --warning: #92400e;
+        --success: #166534;
+    }
+
+    body {
+        background: #ffffff;
+    }
+
+    .admin-sidebar,
+    .app-footer,
+    .toast-container,
+    .no-print,
+    .debug-panel,
+    #idle-warning {
+        display: none !important;
+    }
+
+    .print-only {
+        display: block;
+    }
+
+    .admin-main {
+        padding: 0;
+        overflow: visible;
+    }
+
+    .panel {
+        box-shadow: none;
+        border: none;
+        padding: 0;
+    }
+
+    /* A dialog is open (the statement): print just the dialog. */
+    body:has(#modal-overlay) > *:not(#modal-overlay) {
+        display: none !important;
+    }
+
+    #modal-overlay {
+        position: static;
+        background: none;
+        padding: 0;
+        display: block;
+    }
+
+    #modal-overlay .modal {
+        box-shadow: none;
+        max-width: none;
+        width: auto;
+        max-height: none;
+        overflow: visible;
+        padding: 0;
+    }
+}

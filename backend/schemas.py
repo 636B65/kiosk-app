@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -138,6 +138,53 @@ class RestockIn(BaseModel):
     quantity: int = Field(ge=1, le=MAX_RESTOCK_QUANTITY)
     unit_cost: Optional[float] = Field(default=None, ge=0)
     note: str = Field(default="", max_length=MAX_RESTOCK_NOTE_LENGTH)
+
+
+ADJUSTMENT_REASONS = ("shrinkage", "damaged", "expired", "miscount", "other")
+MAX_COUNT_ITEMS = 500
+
+
+class StockCountItem(BaseModel):
+    product_id: int
+    counted: int = Field(ge=0, le=MAX_RESTOCK_QUANTITY)
+    # The system stock the count sheet showed; the count is refused for this
+    # product (conflict) if sales or a delivery changed it since.
+    expected_stock: int
+    # Defaults: a shortfall is shrinkage, a surplus a miscount; equal = "match".
+    reason: Optional[Literal["shrinkage", "damaged", "expired", "miscount", "other"]] = None
+    note: str = Field(default="", max_length=200)
+
+
+class StockCountIn(BaseModel):
+    items: List[StockCountItem] = Field(min_length=1, max_length=MAX_COUNT_ITEMS)
+
+
+class StockAdjustmentOut(BaseModel):
+    id: int
+    product_id: Optional[int] = None
+    product_name: str
+    expected: int
+    counted: int
+    difference: int
+    reason: str
+    unit_cost: Optional[float] = None
+    note: str = ""
+    created_by: str = ""
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StockCountConflict(BaseModel):
+    product_id: int
+    product_name: str
+    expected_stock: int
+    current_stock: Optional[int] = None
+
+
+class StockCountResult(BaseModel):
+    applied: List[StockAdjustmentOut]
+    conflicts: List[StockCountConflict]
 
 
 class RestockOut(BaseModel):

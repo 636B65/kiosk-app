@@ -61,9 +61,10 @@
             backup_keep: "7",
         },
         restocks: [],
+        adjustments: [],
         audit: [],
         tokens: {},
-        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100, restock: 1, audit: 1 },
+        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100, restock: 1, adjustment: 1, audit: 1 },
     };
 
     const CAT_ID = (name) => DB.categories.find((c) => c.name === name).id;
@@ -639,6 +640,97 @@
             .map((row) => ({ ...row, revenue: Math.round(row.revenue * 100) / 100 }));
     }
 
+    // Mirrors backend/routers/reports.py::shrinkage.
+    function shrinkageFor(period) {
+        const [start, end] = periodBounds(period);
+        const rows = new Map();
+        const byReason = {};
+        for (const a of DB.adjustments) {
+            if (a.difference === 0) continue;
+            const at = new Date(a.created_at);
+            if (start && (at < start || at >= end)) continue;
+            const row = rows.get(a.product_name) || {
+                product_id: a.product_id, product_name: a.product_name,
+                units_lost: 0, units_found: 0, value_lost: 0, counts: 0,
+            };
+            row.counts += 1;
+            if (a.difference < 0) {
+                row.units_lost += -a.difference;
+                row.value_lost += -a.difference * (a.unit_cost || 0);
+                byReason[a.reason] = (byReason[a.reason] || 0) - a.difference;
+            } else {
+                row.units_found += a.difference;
+            }
+            rows.set(a.product_name, row);
+        }
+        const products = [...rows.values()]
+            .map((r) => ({ ...r, value_lost: round2(r.value_lost) }))
+            .sort((a, b) => b.value_lost - a.value_lost || b.units_lost - a.units_lost || a.product_name.localeCompare(b.product_name));
+        return {
+            period, products, by_reason: byReason,
+            totals: {
+                units_lost: products.reduce((n, r) => n + r.units_lost, 0),
+                units_found: products.reduce((n, r) => n + r.units_found, 0),
+                value_lost: round2(products.reduce((n, r) => n + r.value_lost, 0)),
+            },
+        };
+    }
+
+    // Mirrors backend/routers/reports.py::reorder_suggestions.
+    function reorderFor(days, cover) {
+        const since = new Date(Date.now() - days * 86400000);
+        const sold = {};
+        for (const o of DB.orders) {
+            if (o.status === "cancelled" || new Date(o.created_at) < since) continue;
+            for (const it of o.items) sold[it.product_id] = (sold[it.product_id] || 0) + it.quantity;
+        }
+        const products = [];
+        for (const p of DB.products) {
+            if (!p.is_active) continue;
+            const units = sold[p.id] || 0;
+            const perDay = units / days;
+            const threshold = p.low_stock_threshold ?? 5;
+            const suggested = Math.max(0, Math.ceil(perDay * cover) + threshold - p.stock);
+            if (suggested === 0) continue;
+            products.push({
+                product_id: p.id, product_name: p.name,
+                category: DB.categories.find((c) => c.id === p.category_id)?.name || "",
+                stock: p.stock, low_stock_threshold: threshold, sold: units, per_day: round2(perDay),
+                suggested, unit_cost: p.cost_price ?? null,
+                estimated_cost: p.cost_price != null ? round2(suggested * p.cost_price) : null,
+            });
+        }
+        products.sort((a, b) => b.suggested - a.suggested || a.product_name.localeCompare(b.product_name));
+        return {
+            days, cover_days: cover, products,
+            totals: {
+                units: products.reduce((n, r) => n + r.suggested, 0),
+                estimated_cost: round2(products.reduce((n, r) => n + (r.estimated_cost || 0), 0)),
+            },
+        };
+    }
+
+    function reorderCsvResponse(data) {
+        const cell = (value) => {
+            const text = String(value ?? "");
+            const safe = typeof value === "string" && text.trimStart().match(/^[=+\-@\t\r]/) ? "'" + text : text;
+            return `"${safe.replace(/"/g, '""')}"`;
+        };
+        const rows = [["product", "category", "stock", "low_stock_threshold", `sold_last_${data.days}_days`,
+            "per_day", "order_quantity", "unit_cost", "estimated_cost"]];
+        for (const r of data.products) {
+            rows.push([r.product_name, r.category, r.stock, r.low_stock_threshold, r.sold, r.per_day,
+                r.suggested, r.unit_cost ?? "", r.estimated_cost ?? ""]);
+        }
+        rows.push(["TOTAL", "", "", "", "", "", data.totals.units, "", data.totals.estimated_cost]);
+        return new Response("\uFEFF" + rows.map((row) => row.map(cell).join(",")).join("\r\n"), {
+            headers: {
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": 'attachment; filename="kiosk-reorder-demo.csv"',
+            },
+        });
+    }
+
     function reportCsvResponse() {
         const headers = [
             "section", "period", "record", "id", "name", "count",
@@ -973,6 +1065,46 @@
             requireAdmin(init);
             return DB.restocks.slice().reverse().slice(0, Number(query.get("limit")) || 50);
         }
+        if (path === "/inventory/counts" && method === "POST") {
+            requireAdmin(init);
+            const items = Array.isArray(body.items) ? body.items : [];
+            if (items.length === 0) throw new ApiError(HTTP.UNPROCESSABLE, "items must not be empty");
+            const reasons = ["shrinkage", "damaged", "expired", "miscount", "other"];
+            for (const it of items) {
+                if (!Number.isInteger(it.counted) || it.counted < 0) throw new ApiError(HTTP.UNPROCESSABLE, "counted must be 0 or more");
+                if (it.reason != null && !reasons.includes(it.reason)) throw new ApiError(HTTP.UNPROCESSABLE, "Invalid reason");
+            }
+            const applied = [];
+            const conflicts = [];
+            for (const it of items) {
+                const p = DB.products.find((x) => x.id === it.product_id);
+                if (!p || p.stock !== it.expected_stock) {
+                    conflicts.push({
+                        product_id: it.product_id, product_name: p ? p.name : "(deleted)",
+                        expected_stock: it.expected_stock, current_stock: p ? p.stock : null,
+                    });
+                    continue;
+                }
+                const difference = it.counted - it.expected_stock;
+                const reason = it.reason || (difference === 0 ? "match" : difference < 0 ? "shrinkage" : "miscount");
+                p.stock = it.counted;
+                const adjustment = {
+                    id: DB.nextId.adjustment++, product_id: p.id, product_name: p.name,
+                    expected: it.expected_stock, counted: it.counted, difference, reason,
+                    unit_cost: p.cost_price ?? null, note: (it.note || "").trim(),
+                    created_by: actorOf(init), created_at: fmtDT(new Date()),
+                };
+                DB.adjustments.push(adjustment);
+                audit(actorOf(init), "product.count", "product", p.id,
+                    `${p.name}: counted ${it.counted}, system ${it.expected_stock} (${difference >= 0 ? "+" : ""}${difference}, ${reason})`);
+                applied.push(adjustment);
+            }
+            return { applied, conflicts };
+        }
+        if (path === "/inventory/adjustments" && method === "GET") {
+            requireAdmin(init);
+            return DB.adjustments.slice().reverse().slice(0, Number(query.get("limit")) || 100);
+        }
         if (parts.length === 3 && parts[0] === "products" && parts[2] === "image" && method === "POST") {
             requireAdmin(init);
             const p = DB.products.find((x) => x.id === Number(parts[1]));
@@ -1282,6 +1414,25 @@
             }
             const [start, end] = periodBounds(period);
             return { period, ...marginsFor(start, end) };
+        }
+
+        if (path === "/reports/shrinkage" && method === "GET") {
+            requireAdmin(init);
+            const period = query.get("period") || "month";
+            if (!["today", "week", "month", "all"].includes(period)) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "Invalid period");
+            }
+            return shrinkageFor(period);
+        }
+        if ((path === "/reports/reorder" || path === "/reports/reorder.csv") && method === "GET") {
+            requireAdmin(init);
+            const days = Number(query.get("days") || 28);
+            const cover = Number(query.get("cover_days") || 14);
+            if (!(days >= 1 && days <= 365 && cover >= 1 && cover <= 180)) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "Invalid days");
+            }
+            const data = reorderFor(days, cover);
+            return path === "/reports/reorder" ? data : reorderCsvResponse(data);
         }
 
         if (path === "/audit" && method === "GET") {

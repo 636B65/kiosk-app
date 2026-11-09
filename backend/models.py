@@ -186,6 +186,30 @@ class Restock(Base):
     created_at = Column(DateTime, default=utcnow, index=True)
 
 
+class StockAdjustment(Base):
+    """An inventory count: the shelf held `counted` where the system said `expected`.
+
+    `difference` (counted - expected) is what the count changed the stock by;
+    negative differences are shrinkage, valued at the purchase price of the time.
+    """
+
+    __tablename__ = "stock_adjustments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(
+        Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    product_name = Column(String, nullable=False)
+    expected = Column(Integer, nullable=False)
+    counted = Column(Integer, nullable=False)
+    difference = Column(Integer, nullable=False)
+    reason = Column(String, nullable=False)
+    unit_cost = Column(Float, nullable=True)
+    note = Column(String, default="")
+    created_by = Column(String, default="")
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 

@@ -67,6 +67,11 @@ sample data. Everything lives in your browser and **resets on reload**.
   recent payment insights, margins per product (today/week/month/all time, using the
   purchase price at the time of sale), and CSV export of inventory (selling and cost
   value), restock needs, margins, customer balances, and report data
+- Inventory: count the shelf, book differences with a reason (missing, damaged,
+  expired, ...) and follow shrinkage per product and period, valued at the purchase price
+- Reorder suggestions from the recent sales pace and each product's low-stock threshold,
+  with estimated cost, CSV export and print view
+- Printable account statement per customer and month (purchases, payments, balance)
 - Audit log: who marked orders paid or cancelled, reset or self-marked payments,
   changed products, prices, stock, settings or users, and took backups, and when
 - System page: backend/frontend version, uptime, database size, counts, and backups

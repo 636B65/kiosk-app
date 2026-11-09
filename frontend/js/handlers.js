@@ -37,6 +37,16 @@ Actions.register("admin-new-category", () => Admin.openCategoryModal());
 Actions.register("admin-new-user", () => Admin.openUserModal());
 Actions.register("admin-save-settings", () => Admin.saveSettings());
 Actions.register("admin-export-reports-csv", () => Admin.exportReportsCsv());
+Actions.register("admin-save-count", () => Admin.saveCount());
+Actions.register("admin-shrinkage-period", (el) => {
+    Admin.shrinkagePeriod = el.dataset.period;
+    Admin.renderInventory();
+});
+Actions.register("admin-reorder-update", () => Admin.updateReorder());
+Actions.register("admin-reorder-csv", () => Admin.exportReorderCsv());
+Actions.register("admin-statement", (el) => Admin.openStatement(decodeURIComponent(el.dataset.username)));
+Actions.register("admin-statement-month", (el) => Admin.changeStatementMonth(el.value));
+Actions.register("print-page", () => window.print());
 
 Actions.register("kiosk-new-order", () => {
     Modal.close();
