@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+data/
+**/data/
+*.db
+*.db-wal
+*.db-shm
+pin_pepper.key
+node_modules/

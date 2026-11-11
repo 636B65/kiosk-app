@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Services (lint + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -U pip
+          pip install -r requirements-dev.txt
+          pip install -e libs/kiosk_common
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Integration tests (every service in one process, SQLite)
+        run: pytest -v
+
+  frontend:
+    name: Frontend syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: node --check frontend/js/*.js
+
+  manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin kubeconform
+
+      - name: Build and validate overlays
+        run: |
+          for overlay in dev prod; do
+            echo "== deploy/overlays/$overlay"
+            kubectl kustomize "deploy/overlays/$overlay" > "/tmp/$overlay.yaml"
+            kubeconform -strict -summary -ignore-missing-schemas "/tmp/$overlay.yaml"
+          done
+          kubeconform -strict -summary -ignore-missing-schemas deploy/argocd/*.yaml
+
+  images:
+    name: Build image (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - auth-service
+          - catalog-service
+          - customer-service
+          - order-service
+          - settings-service
+          - audit-service
+          - report-service
+          - system-service
+          - frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image == 'frontend' && 'frontend' || '.' }}
+          file: ${{ matrix.image == 'frontend' && 'frontend/Dockerfile' || 'docker/service.Dockerfile' }}
+          build-contexts: |
+            repo=.
+          build-args: |
+            SERVICE=${{ matrix.image }}
+            PG_CLIENT_VERSION=${{ matrix.image == 'system-service' && '16' || '' }}
+          push: false
+          tags: kiosk-microservices/${{ matrix.image }}:ci
+
+  compose-smoke:
+    name: Docker compose smoke
+    runs-on: ubuntu-latest
+    needs: [python]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start the stack
+        env:
+          SECRET_KEY: ci-secret-key-0123456789abcdef0123456789abcdef
+          INTERNAL_TOKEN: ci-internal-token-0123456789abcdef0123456789
+          PIN_PEPPER: ci-pin-pepper-0123456789abcdef0123456789abcdef
+          ADMIN_PASSWORD: ci-admin-password
+        run: docker compose up -d --build --quiet-pull
+
+      - name: Wait for the gateway health check
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/api/health | grep -q '"status":"ok"'; then
+              echo "healthy after ${i}s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::stack did not become healthy"
+          docker compose ps
+          docker compose logs --tail=50
+          exit 1
+
+      - name: Checkout, login and read reports through the gateway
+        run: |
+          set -eux
+          product_id="$(curl -fsS http://localhost:8080/api/products | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')"
+          curl -fsS -X POST http://localhost:8080/api/orders -H 'Content-Type: application/json' \
+            -d "{\"customer_username\":\"ci\",\"items\":[{\"product_id\":$product_id,\"quantity\":1}]}"
+          token="$(curl -fsS -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"ci-admin-password"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+          curl -fsS http://localhost:8080/api/reports/summary -H "Authorization: Bearer $token" | grep -q '"outstanding"'
+          curl -fsS http://localhost:8080/api/customers/ci | grep -q '"balance"'
+          curl -fsS -X POST http://localhost:8080/api/system/backups -H "Authorization: Bearer $token" | grep -q 'tar.gz'
+          curl -fsS http://localhost:8080/api/system/status -H "Authorization: Bearer $token" | grep -q '"postgresql"'
+          curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/internal/stock/release | grep -q 404
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=100

@@ -1,0 +1,810 @@
+const Kiosk = {
+    init() {
+        document.addEventListener("click", (e) => {
+            const addBtn = e.target.closest(".add-btn");
+            if (addBtn) this.addToCart(parseInt(addBtn.dataset.id));
+            const qty = e.target.closest(".qty-btn");
+            if (qty) this.changeQty(parseInt(qty.dataset.id), parseInt(qty.dataset.delta));
+            const cat = e.target.closest(".category-pill");
+            if (cat) this.setCategory(parseInt(cat.dataset.id));
+            // #lookup-btn shares the .cart-btn style but must not open the cart.
+            const cartBtn = e.target.closest(".cart-btn:not(#lookup-btn)");
+            if (cartBtn) this.toggleCart();
+            const lookupBtn = e.target.closest("#lookup-btn");
+            if (lookupBtn) this.openLookup();
+            const closeCart = e.target.closest(".cart-close");
+            if (closeCart) this.toggleCart();
+            const overlay = e.target.closest(".cart-overlay");
+            if (e.target === overlay) this.toggleCart();
+            const removeItem = e.target.closest(".remove-item");
+            if (removeItem) this.removeFromCart(parseInt(removeItem.dataset.id));
+            const checkout = e.target.closest(".checkout-btn");
+            if (checkout) this.checkout();
+            const recalc = e.target.closest(".recalc-cart");
+            if (recalc) this.renderCart();
+        });
+        document.addEventListener("submit", (e) => {
+            const barcodeForm = e.target.closest("#barcode-scan-form");
+            if (barcodeForm) {
+                e.preventDefault();
+                this.scanBarcode(document.getElementById("barcode-input").value);
+            }
+        });
+        for (const type of ["pointerdown", "keydown", "input", "wheel", "touchstart"]) {
+            document.addEventListener(type, () => this.noteActivity(), { capture: true, passive: true });
+        }
+    },
+
+    // ---- Idle reset: a walk-away customer's cart must not reach the next person.
+
+    IDLE_WARNING_SECONDS: 10,
+    idleTimer: null,
+    idleCountdown: null,
+
+    idleSeconds() {
+        const value = parseInt(Store.settings.kiosk_idle_seconds ?? "90", 10);
+        return Number.isFinite(value) && value > 0 ? value : 0;
+    },
+
+    noteActivity() {
+        if (document.getElementById("idle-warning")) this.cancelIdleWarning();
+        this.armIdleTimer();
+    },
+
+    armIdleTimer() {
+        clearTimeout(this.idleTimer);
+        const seconds = this.idleSeconds();
+        if (seconds) this.idleTimer = setTimeout(() => this.onIdle(), seconds * 1000);
+    },
+
+    hasSession() {
+        return Store.cart.length > 0
+            || Store.activeCategory != null
+            || !!document.getElementById("modal-overlay")
+            || !!document.getElementById("cart-overlay")
+            || !!document.getElementById("search-input")?.value;
+    },
+
+    onIdle() {
+        if (currentRoute !== "customer" || !this.hasSession()) {
+            this.armIdleTimer();
+            return;
+        }
+        let remaining = this.IDLE_WARNING_SECONDS;
+        const warning = document.createElement("div");
+        warning.id = "idle-warning";
+        warning.className = "idle-warning";
+        warning.innerHTML = `
+            <div class="idle-warning-card">
+                <h2>Still there?</h2>
+                <p>The kiosk resets in <strong id="idle-countdown">${remaining}</strong> s
+                   and your cart will be cleared.</p>
+                <button class="btn btn-primary" data-action="kiosk-idle-continue">I'm still here</button>
+            </div>
+        `;
+        document.body.appendChild(warning);
+        this.idleCountdown = setInterval(() => {
+            remaining -= 1;
+            const el = document.getElementById("idle-countdown");
+            if (el) el.textContent = remaining;
+            if (remaining <= 0) this.resetSession();
+        }, 1000);
+    },
+
+    cancelIdleWarning() {
+        clearInterval(this.idleCountdown);
+        document.getElementById("idle-warning")?.remove();
+    },
+
+    resetSession() {
+        this.cancelIdleWarning();
+        this.lookupPin = "";
+        Store.cart = [];
+        Store.saveCart();
+        Store.activeCategory = null;
+        Modal.close();
+        document.getElementById("cart-overlay")?.remove();
+        if (currentRoute === "customer") this.renderBody();
+        Toast.show("The kiosk was reset after inactivity");
+        this.armIdleTimer();
+    },
+
+    renderHeader() {
+        const name = Store.settings.store_name || "Kiosk Store";
+        return `
+            <header class="kiosk-header">
+                <h1>🛍️ ${esc(name)}</h1>
+                ${Store.settings.kiosk_barcode_scanning === "true" ? `
+                <form id="barcode-scan-form" class="barcode-scan-form">
+                    <input id="barcode-input" aria-label="Scan product barcode"
+                           placeholder="Scan barcode…" autocomplete="off" autocapitalize="off">
+                    <button type="submit">Scan</button>
+                </form>` : ""}
+                <div style="display:flex; gap:0.75rem;">
+                    <button class="cart-btn" id="lookup-btn">🔍 User lookup</button>
+                    <button class="cart-btn">🛒 Cart <span class="cart-badge" id="cart-count">${Store.cartCount()}</span></button>
+                </div>
+            </header>
+        `;
+    },
+
+    renderCategories() {
+        const cats = [
+            { id: null, name: "All" },
+            ...Store.categories,
+        ];
+        return `
+            <div class="categories-bar">
+                ${cats.map((c) => `
+                    <button class="category-pill ${Store.activeCategory === c.id ? "active" : ""}"
+                            data-id="${c.id ?? ""}">${esc(c.name)}</button>
+                `).join("")}
+            </div>
+        `;
+    },
+
+    renderProductGrid() {
+        const filtered = Store.products.filter((p) => {
+            if (Store.activeCategory && p.category_id !== Store.activeCategory) return false;
+            const search = (document.getElementById("search-input")?.value || "").toLowerCase();
+            if (search && !p.name.toLowerCase().includes(search)) return false;
+            return true;
+        });
+        const products = sortShopProducts(filtered);
+        const container = document.getElementById("product-grid-container");
+        if (!container) return;
+        container.innerHTML = `
+            <div class="product-grid">
+                ${products.length === 0
+                    ? '<p style="grid-column: 1/-1; text-align:center; color: var(--muted); padding: 2rem;">No products found</p>'
+                    : products.map(this.productCard.bind(this)).join("")}
+            </div>
+        `;
+        this.updateCartBadge();
+    },
+
+    productCard(p) {
+        const inCart = Store.cart.find((i) => i.product_id === p.id);
+        const qty = inCart ? inCart.quantity : 0;
+        const soldOut = p.stock <= 0;
+        const lowStock = p.stock > 0 && isLowStock(p);
+        const isSpecial = isSpecialActive(p);
+        return `
+            <div class="product-card">
+                ${isSpecial ? '<div class="weekly-badge">⚡ Weekly special</div>' : ""}
+                <div class="product-image">${renderProductImage(p)}</div>
+                <div class="product-name">${esc(p.name)}</div>
+                <div class="product-desc">${esc(p.description)}</div>
+                <div class="product-price">
+                    ${isSpecial
+                        ? `<span class="price-old">${fmt(p.price)}</span> <span class="price-special">${fmt(p.special_price)}</span>`
+                        : fmt(p.price)}
+                </div>
+                <div class="stock-label ${lowStock ? "stock-low" : ""} ${soldOut ? "stock-out" : ""}">
+                    ${soldOut ? "Out of stock" : `${p.stock} in stock`}
+                </div>
+                <div class="product-actions">
+                    ${soldOut
+                        ? `<button class="add-btn" disabled>Sold out</button>`
+                        : qty > 0
+                            ? `
+                        <div class="qty-control">
+                            <button class="qty-btn" data-id="${p.id}" data-delta="-1">−</button>
+                            <span>${qty}</span>
+                            <button class="qty-btn" data-id="${p.id}" data-delta="1">+</button>
+                        </div>`
+                            : `<button class="add-btn" data-id="${p.id}">Add to cart</button>`}
+                </div>
+            </div>
+        `;
+    },
+
+    setCategory(id) {
+        Store.activeCategory = id;
+        this.renderBody();
+    },
+
+    addToCart(productId) {
+        const product = Store.products.find((p) => p.id === productId);
+        if (!product) return;
+        if (product.stock <= 0) {
+            Toast.error("This product is out of stock");
+            return;
+        }
+        const item = Store.cart.find((i) => i.product_id === productId);
+        if (item) {
+            if (item.quantity >= product.stock) {
+                Toast.error("No more stock available");
+                return;
+            }
+            item.quantity += 1;
+        } else {
+            Store.cart.push({ product_id: product.id, name: product.name, price: effectivePrice(product), quantity: 1 });
+        }
+        Store.saveCart();
+        this.refreshUI();
+    },
+
+    async scanBarcode(value) {
+        const input = document.getElementById("barcode-input");
+        const barcode = (value || "").trim();
+        if (!barcode) return;
+        if (input) input.value = "";
+        try {
+            const product = await API.get(`/products/barcode/${encodeURIComponent(barcode)}`);
+            const existing = Store.products.findIndex((item) => item.id === product.id);
+            if (existing === -1) Store.products.push(product);
+            else Store.products[existing] = product;
+            if (product.stock <= 0) {
+                Toast.error(`${product.name} is out of stock`);
+                return;
+            }
+            this.addToCart(product.id);
+            Toast.success(`${product.name} added to cart`);
+        } catch (err) {
+            Toast.error(err.message || "No product found for that barcode");
+        } finally {
+            document.getElementById("barcode-input")?.focus();
+        }
+    },
+
+    changeQty(productId, delta) {
+        const item = Store.cart.find((i) => i.product_id === productId);
+        if (!item) return;
+        const product = Store.products.find((p) => p.id === productId);
+        item.quantity += delta;
+        if (item.quantity <= 0 || (product && delta > 0 && item.quantity > product.stock)) {
+            if (product && delta > 0 && item.quantity > product.stock) {
+                Toast.error("No more stock available");
+                item.quantity = product.stock;
+            } else {
+                Store.cart = Store.cart.filter((i) => i.product_id !== productId);
+                Toast.show("Removed from cart");
+            }
+        }
+        Store.saveCart();
+        this.refreshUI();
+    },
+
+    removeFromCart(productId) {
+        Store.cart = Store.cart.filter((i) => i.product_id !== productId);
+        Store.saveCart();
+        this.refreshUI();
+    },
+
+    refreshUI() {
+        this.renderProductGrid();
+        this.updateCartBadge();
+        if (document.getElementById("cart-overlay")) {
+            this.renderCart();
+        }
+    },
+
+    updateCartBadge() {
+        const badge = document.getElementById("cart-count");
+        if (badge) badge.textContent = Store.cartCount();
+    },
+
+    toggleCart() {
+        const overlay = document.getElementById("cart-overlay");
+        if (overlay) {
+            overlay.remove();
+            return;
+        }
+        this.renderCart();
+    },
+
+    renderCart() {
+        const old = document.getElementById("cart-overlay");
+        if (old) old.remove();
+        const total = Store.cartTotal();
+        const overlay = document.createElement("div");
+        overlay.className = "cart-overlay";
+        overlay.id = "cart-overlay";
+        overlay.innerHTML = `
+            <div class="cart-panel">
+                <div class="cart-header">
+                    Your Cart
+                    <button class="close-btn cart-close">✕</button>
+                </div>
+                <div class="cart-items">
+                    ${Store.cart.length === 0
+                        ? '<div class="cart-empty">Your cart is empty</div>'
+                        : Store.cart.map((i) => `
+                            <div class="cart-item">
+                                <div class="cart-item-info">
+                                    <div class="cart-item-name">${esc(i.name)}</div>
+                                    <div class="cart-item-price">${fmt(i.price)} × ${i.quantity}</div>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:0.5rem;">
+                                    <button class="btn btn-secondary qty-btn" data-id="${i.product_id}" data-delta="-1">−</button>
+                                    <button class="btn btn-secondary qty-btn" data-id="${i.product_id}" data-delta="1">+</button>
+                                    <button class="btn btn-danger remove-item" data-id="${i.product_id}">✕</button>
+                                </div>
+                            </div>
+                        `).join("")}
+                </div>
+                <div class="cart-footer">
+                    <div class="cart-total-row">
+                        <span>Total</span><span>${fmt(total)}</span>
+                    </div>
+                    <button class="checkout-btn" ${Store.cart.length === 0 ? "disabled" : ""}>
+                        Buy
+                    </button>
+                    <p style="font-size:0.8rem; color:var(--muted); text-align:center; margin:0;">
+                        The amount is added to your balance and paid at the counter on a later visit.
+                        You can keep shopping on your tab; once the payment due date has passed,
+                        unpaid balances must be settled at the counter before the next purchase.
+                    </p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    },
+
+    checkout() {
+        Modal.open(`
+            <h2>Buy</h2>
+            <p style="color:var(--muted);">Enter your username to add this purchase to your balance.</p>
+            <form id="checkout-form">
+                <div class="form-group">
+                    <label for="co-username">Username</label>
+                    <input id="co-username" autocomplete="off" required>
+                </div>
+                <div class="form-group" id="co-pin-group" hidden>
+                    <label for="co-pin">PIN</label>
+                    <input id="co-pin" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8">
+                    <button type="button" class="link-btn" data-action="kiosk-forgot-pin">Forgot your PIN?</button>
+                    <p class="pin-forgot-help" hidden>
+                        Pay your outstanding balance at the counter and tell the staff that you forgot
+                        your PIN. Once your balance is paid, they can remove the PIN, and you can then
+                        set a new one in User lookup.
+                    </p>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Buy</button>
+                </div>
+            </form>
+        `);
+        document.getElementById("co-username").focus();
+        document.getElementById("checkout-form").addEventListener("submit", (e) => {
+            e.preventDefault();
+            this.placeOrder(
+                document.getElementById("co-username").value,
+                document.getElementById("co-pin").value
+            );
+        });
+    },
+
+    // Show the PIN field in an open form and put the cursor in it.
+    askForPin(groupId, inputId, message) {
+        const group = document.getElementById(groupId);
+        const input = document.getElementById(inputId);
+        if (!group || !input) return;
+        group.hidden = false;
+        input.required = true;
+        input.value = "";
+        input.focus();
+        if (message) Toast.error(message);
+    },
+
+    isPinError(err) {
+        return err.status === 428 || err.status === 429 || (err.status === 403 && err.message === "Wrong PIN");
+    },
+
+    async placeOrder(username, pin = "") {
+        const userName = username.trim();
+        if (!userName) {
+            Toast.error("Enter your username");
+            return;
+        }
+        // A double-tap (or Enter pressed twice) must not place the order twice:
+        // that books the items twice and the shelf no longer matches the stock.
+        if (this.placingOrder) return;
+        this.placingOrder = true;
+        const buyBtn = document.querySelector("#checkout-form button[type=submit]");
+        if (buyBtn) buyBtn.disabled = true;
+        try {
+            const items = Store.cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
+            const order = await API.post("/orders", {
+                customer_username: userName, items, notes: "", customer_pin: pin || null,
+            });
+            Store.cart = [];
+            Store.saveCart();
+            document.getElementById("cart-overlay")?.remove();
+            await Store.loadPublicData();
+            this.renderBody();
+            let history = null;
+            try {
+                history = await API.request(`/customers/${encodeURIComponent(userName)}`, {
+                    headers: pin ? { "X-Customer-PIN": pin } : {},
+                });
+            } catch {}
+            this.renderConfirmation(order, history);
+        } catch (err) {
+            if (this.isPinError(err)) {
+                // Keep the dialog and cart; ask for (another) PIN.
+                this.askForPin("co-pin-group", "co-pin",
+                    err.status === 428 ? "This account is protected with a PIN" : err.message);
+                return;
+            }
+            Toast.error(err.message);
+            await Store.loadPublicData();
+            this.renderBody();
+        } finally {
+            this.placingOrder = false;
+            if (buyBtn?.isConnected) buyBtn.disabled = false;
+        }
+    },
+
+    renderConfirmation(order, history) {
+        confetti();
+        Modal.open(`
+            <h2>✅ Order Complete</h2>
+            <p style="color:var(--muted);">Order #${order.id} for ${esc(order.customer_username)}</p>
+            <p><strong>Order total:</strong> ${fmt(order.total)}</p>
+            ${history ? `
+                <p style="color:var(--warning); font-weight:700;">Balance to pay: ${fmt(history.balance)}</p>
+                ${history.stats?.next_due_date && history.balance > 0 ? `
+                    <p style="color:var(--muted);">Next payment due: <strong>${new Date(history.stats.next_due_date).toLocaleDateString()}</strong></p>
+                ` : ""}
+            ` : ""}
+            <p style="color:var(--muted);">${esc(Store.settings.receipt_footer || "Thank you for your purchase!")}</p>
+            <div class="form-actions">
+                <button class="btn btn-secondary" data-action="kiosk-open-lookup">Look up user</button>
+                <button class="btn btn-primary" data-action="kiosk-new-order">New Order</button>
+            </div>
+        `);
+    },
+
+    // PIN that unlocked the lookup shown now; needed to refresh it after changes.
+    lookupPin: "",
+
+    openLookup() {
+        this.lookupPin = "";
+        Modal.open(`
+            <h2>Payment lookup</h2>
+            <p style="color:var(--muted);">Start typing to see matching usernames.</p>
+            <form id="lookup-form">
+                <div class="form-group">
+                    <label>Username</label>
+                    <div class="lookup-input-wrap">
+                        <input id="lk-username" autocomplete="off" required
+                               data-action-input="kiosk-lookup-suggest">
+                        <div id="lk-suggestions" class="lookup-suggestions"></div>
+                    </div>
+                </div>
+                <div class="form-group" id="lk-pin-group" hidden>
+                    <label for="lk-pin">PIN</label>
+                    <input id="lk-pin" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8">
+                    <button type="button" class="link-btn" data-action="kiosk-forgot-pin">Forgot your PIN?</button>
+                    <p class="pin-forgot-help" hidden>
+                        Pay your outstanding balance at the counter and tell the staff that you forgot
+                        your PIN. Once your balance is paid, they can remove the PIN, and you can then
+                        set a new one in User lookup.
+                    </p>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Look up</button>
+                </div>
+            </form>
+        `);
+        document.getElementById("lk-username").focus();
+        document.getElementById("lookup-form").addEventListener("submit", (e) => {
+            e.preventDefault();
+            this.clearSuggestions();
+            this.lookupUser(
+                document.getElementById("lk-username").value,
+                document.getElementById("lk-pin").value
+            );
+        });
+    },
+
+    suggestTimer: null,
+
+    async suggestLookup(inputEl) {
+        const value = inputEl.value.trim();
+        const box = document.getElementById("lk-suggestions");
+        if (!box) return;
+        if (!value) {
+            this.clearSuggestions();
+            return;
+        }
+        clearTimeout(this.suggestTimer);
+        this.suggestTimer = setTimeout(async () => {
+            try {
+                const list = await API.get(`/customers/suggest?q=${encodeURIComponent(value)}`);
+                this.renderSuggestions(box, list);
+            } catch {
+                this.clearSuggestions();
+            }
+        }, 180);
+    },
+
+    clearSuggestions() {
+        const box = document.getElementById("lk-suggestions");
+        if (box) {
+            box.innerHTML = "";
+            box.classList.remove("open");
+        }
+    },
+
+    renderSuggestions(box, list) {
+        if (!list || list.length === 0) {
+            this.clearSuggestions();
+            return;
+        }
+        box.innerHTML = list
+            .map((u) => `
+                <button type="button" class="lookup-suggestion"
+                        data-action="kiosk-lookup-pick"
+                        data-username="${esc(u)}">${esc(u)}</button>
+            `)
+            .join("");
+        box.classList.add("open");
+    },
+
+    pickLookup(username) {
+        this.clearSuggestions();
+        const input = document.getElementById("lk-username");
+        if (input) input.value = username;
+        this.lookupUser(username);
+    },
+
+    async lookupUser(username, pin = "") {
+        const userName = username.trim();
+        if (!userName) return;
+        try {
+            const data = await this.fetchLookup(userName, pin);
+            this.lookupPin = pin;
+            Kiosk.showLookup(data);
+        } catch (err) {
+            if (this.isPinError(err) && document.getElementById("lk-pin-group")) {
+                this.askForPin("lk-pin-group", "lk-pin",
+                    err.status === 428 ? "This account is protected with a PIN" : err.message);
+                return;
+            }
+            Toast.error(err.message);
+        }
+    },
+
+    fetchLookup(username, pin) {
+        return API.request(`/customers/${encodeURIComponent(username)}`, {
+            headers: pin ? { "X-Customer-PIN": pin } : {},
+        });
+    },
+
+    openPinSetup(username, hasPin) {
+        Modal.open(`
+            <h2>${hasPin ? "Change PIN" : "Protect your account with a PIN"}</h2>
+            <p style="color:var(--muted); margin-bottom:1rem;">
+                With a PIN (4 to 8 digits), nobody can buy on your tab or see your balance
+                without it. The staff can never see your PIN; if you forget it, they can
+                remove it once your balance is paid.
+            </p>
+            <form id="pin-form">
+                ${hasPin ? `
+                <div class="form-group">
+                    <label for="pin-current">Current PIN</label>
+                    <input id="pin-current" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8" required>
+                    <button type="button" class="link-btn" data-action="kiosk-forgot-pin">Forgot your PIN?</button>
+                    <p class="pin-forgot-help" hidden>
+                        Pay your outstanding balance at the counter and tell the staff that you forgot
+                        your PIN. Once your balance is paid, they can remove the PIN, and you can then
+                        set a new one in User lookup.
+                    </p>
+                </div>` : ""}
+                <div class="form-group">
+                    <label for="pin-new">New PIN (4–8 digits)</label>
+                    <input id="pin-new" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8" required>
+                </div>
+                <div class="form-group">
+                    <label for="pin-repeat">Repeat the new PIN</label>
+                    <input id="pin-repeat" type="password" inputmode="numeric" autocomplete="off"
+                           pattern="[0-9]{4,8}" maxlength="8" required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save PIN</button>
+                </div>
+            </form>
+        `);
+        document.getElementById(hasPin ? "pin-current" : "pin-new").focus();
+        document.getElementById("pin-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const pin = document.getElementById("pin-new").value;
+            if (!/^[0-9]{4,8}$/.test(pin)) {
+                Toast.error("The PIN must be 4 to 8 digits");
+                return;
+            }
+            if (pin !== document.getElementById("pin-repeat").value) {
+                Toast.error("The PINs do not match");
+                document.getElementById("pin-repeat").focus();
+                return;
+            }
+            try {
+                await API.post(`/customers/${encodeURIComponent(username)}/pin`, {
+                    pin,
+                    current_pin: hasPin ? document.getElementById("pin-current").value : null,
+                });
+                this.lookupPin = pin;
+                this.showLookup(await this.fetchLookup(username, pin));
+                Toast.success(hasPin ? "PIN changed" : "PIN set. You will need it to buy and look up.");
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
+    },
+
+    showLookup(data) {
+        const orderBlock = (o) => `
+            <div class="history-order">
+                <div class="history-order-head">
+                    <span>Order #${o.id} — ${new Date(o.created_at).toLocaleString()}</span>
+                    <span class="status-badge status-${o.status}">${o.status}</span>
+                </div>
+                <ul>
+                    ${o.items.map((i) => `
+                        <li>
+                            <span>${esc(i.product_name)} × ${i.quantity}</span>
+                            <span>${fmt(i.unit_price * i.quantity)}</span>
+                        </li>`).join("")}
+                </ul>
+                <div class="history-order-total">Total: ${fmt(o.total)}</div>
+            </div>
+        `;
+        const unpaidCount = data.orders.filter((o) => o.status === "pending").length;
+        const months = groupOrdersByMonth(data.orders);
+        Modal.fill(`
+            <h2>👤 ${esc(data.customer.username)}</h2>
+            <div class="balance-big">${fmt(data.balance)}</div>
+            <p style="text-align:center; color:var(--muted); margin-bottom:1rem;">
+                ${data.balance > 0
+                    ? `${unpaidCount} unpaid order(s) — pay this at the counter`
+                    : "No outstanding balance 🎉"}
+            </p>
+            ${data.stats?.next_due_date && data.balance > 0 ? `
+                <p style="text-align:center; color:var(--warning); font-weight:600; margin:0 0 0.5rem;">
+                    Next payment due: ${new Date(data.stats.next_due_date).toLocaleDateString()}
+                </p>
+            ` : ""}
+            <div style="display:flex; justify-content:space-between; padding:0.5rem 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); margin-bottom:1rem;">
+                <span style="color:var(--muted);">Total paid</span>
+                <span style="font-weight:700;">${fmt(data.total_paid)}</span>
+            </div>
+            ${this.renderBuyAgain(data.favorites)}
+            ${renderCustomerStats(data.stats)}
+            <h3 style="margin:1.25rem 0 0.5rem;">Order history</h3>
+            ${data.orders.length === 0
+                ? '<p style="color:var(--muted);">No orders yet.</p>'
+                : months.map((m) => `
+                    <div class="history-month">
+                        <div class="history-month-head">
+                            <span>${esc(m.label)}</span>
+                            <span>${m.orders.length} order(s) — ${fmt(m.orders.reduce((s, o) => s + o.total, 0))}</span>
+                        </div>
+                        ${m.orders.map(orderBlock).join("")}
+                    </div>
+                `).join("")}
+            <div class="form-actions">
+                ${Store.settings.customer_self_service_payment === "true" && data.balance > 0 ? `
+                    <button class="btn btn-success" data-action="kiosk-mark-all-paid"
+                            data-username="${esc(encodeURIComponent(data.customer.username))}">
+                        I have paid everything
+                    </button>
+                ` : ""}
+                <button class="btn btn-secondary" data-action="kiosk-pin-setup"
+                        data-username="${esc(encodeURIComponent(data.customer.username))}"
+                        data-has-pin="${data.customer.has_pin ? "true" : "false"}">
+                    ${data.customer.has_pin ? "🔒 Change PIN" : "🔒 Set a PIN"}
+                </button>
+                <button class="btn btn-secondary" data-action="modal-close">Close</button>
+                <button class="btn btn-primary" data-action="kiosk-open-lookup">Another user</button>
+            </div>
+        `);
+    },
+
+    renderBuyAgain(favorites) {
+        const items = (favorites || [])
+            .map((f) => ({ fav: f, product: Store.products.find((p) => p.id === f.product_id) }))
+            .filter((x) => x.product);
+        if (items.length === 0) return "";
+        return `
+            <div class="buy-again">
+                <div class="buy-again-head">
+                    <h3>⭐ Buy again</h3>
+                    <button class="btn btn-secondary" data-action="kiosk-open-cart">🛒 Cart (<span id="buy-again-count">${Store.cartCount()}</span>)</button>
+                </div>
+                <div class="buy-again-list">
+                    ${items.map(({ fav, product }) => `
+                        <button class="buy-again-btn" data-action="kiosk-buy-again" data-id="${product.id}"
+                                ${product.stock <= 0 ? "disabled" : ""}>
+                            <span class="buy-again-name">${esc(product.name)}</span>
+                            <span class="buy-again-meta">${product.stock <= 0 ? "Sold out" : fmt(effectivePrice(product))} · bought ${fav.quantity}×</span>
+                        </button>
+                    `).join("")}
+                </div>
+            </div>
+        `;
+    },
+
+    buyAgain(productId) {
+        const product = Store.products.find((p) => p.id === productId);
+        if (!product) return;
+        const before = Store.cartCount();
+        this.addToCart(productId);
+        if (Store.cartCount() > before) Toast.success(`${product.name} added to cart`);
+        const count = document.getElementById("buy-again-count");
+        if (count) count.textContent = Store.cartCount();
+    },
+
+    openCartFromModal() {
+        Modal.close();
+        this.renderCart();
+    },
+
+    async markAllPaid(username) {
+        Modal.open(`
+            <h2>Confirm payment</h2>
+            <p>Mark all unpaid orders for <strong>${esc(username)}</strong> as paid?</p>
+            <p style="color:var(--warning);">
+                This updates the store balance immediately and does not verify a payment.
+            </p>
+            <div class="form-actions">
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                <button class="btn btn-success" id="confirm-self-payment">Confirm paid</button>
+            </div>
+        `);
+        document.getElementById("confirm-self-payment").addEventListener("click", async () => {
+            try {
+                const headers = this.lookupPin ? { "X-Customer-PIN": this.lookupPin } : {};
+                const result = await API.request(
+                    `/customers/${encodeURIComponent(username)}/self-mark-paid`,
+                    { method: "POST", body: "{}", headers }
+                );
+                const history = await this.fetchLookup(username, this.lookupPin);
+                this.showLookup(history);
+                Toast.success(`${result.settled} order(s) marked paid for ${result.username}`);
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
+    },
+
+    newOrder() {
+        Store.activeCategory = null;
+        this.renderBody();
+    },
+
+    renderBody() {
+        const app = document.getElementById("app");
+        app.innerHTML = `
+            ${this.renderHeader()}
+            ${this.renderCategories()}
+            <div class="search-bar">
+                <input id="search-input" placeholder="Search products..."
+                       autocomplete="off" spellcheck="false"
+                       data-action-input="kiosk-search">
+            </div>
+            <div id="product-grid-container"></div>
+        `;
+        this.renderProductGrid();
+        document.getElementById("barcode-input")?.focus();
+    },
+
+    async render() {
+        try {
+            await Store.loadPublicData();
+        } catch (err) {
+            Toast.error("Failed to load data: " + err.message);
+        }
+        this.renderBody();
+        this.armIdleTimer();
+    },
+};

@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: system-service
+  labels:
+    app.kubernetes.io/name: system-service
+    app.kubernetes.io/component: service
+spec:
+  selector:
+    app.kubernetes.io/name: system-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: system-service
+  labels:
+    app.kubernetes.io/name: system-service
+    app.kubernetes.io/component: service
+spec:
+  replicas: 1
+  # ReadWriteOnce volume: one replica, replaced rather than rolled.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: system-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: system-service
+        app.kubernetes.io/component: service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ghcr.io/636b65/kiosk-microservices/system-service:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: kiosk-config
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kiosk-secrets
+                  key: SECRET_KEY
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: kiosk-secrets
+                  key: INTERNAL_TOKEN
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kiosk-secrets
+                  key: POSTGRES_PASSWORD
+            - name: BACKUP_DATABASE_URLS
+              value: auth=postgresql://kiosk:$(POSTGRES_PASSWORD)@postgres:5432/auth,catalog=postgresql://kiosk:$(POSTGRES_PASSWORD)@postgres:5432/catalog,customers=postgresql://kiosk:$(POSTGRES_PASSWORD)@postgres:5432/customers,orders=postgresql://kiosk:$(POSTGRES_PASSWORD)@postgres:5432/orders,settings=postgresql://kiosk:$(POSTGRES_PASSWORD)@postgres:5432/settings,audit=postgresql://kiosk:$(POSTGRES_PASSWORD)@postgres:5432/audit
+            - name: BACKUP_DIR
+              value: /app/data/backups
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /app/data
+            - name: backups
+              mountPath: /app/data/backups
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        - name: backups
+          persistentVolumeClaim:
+            claimName: backups

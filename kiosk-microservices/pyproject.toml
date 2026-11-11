@@ -1,0 +1,24 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["frontend", "deploy", "node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "kiosk_common", "auth_service", "catalog_service", "customer_service", "order_service",
+    "settings_service", "audit_service", "report_service", "system_service",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "services"]
+pythonpath = [
+    "libs/kiosk_common",
+    "services/auth-service", "services/catalog-service", "services/customer-service",
+    "services/order-service", "services/settings-service", "services/audit-service",
+    "services/report-service", "services/system-service",
+]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]

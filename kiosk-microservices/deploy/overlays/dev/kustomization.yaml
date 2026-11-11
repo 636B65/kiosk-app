@@ -1,0 +1,49 @@
+# Development / review cluster: one replica of everything, demo secrets
+# generated right here (never do this in prod - see overlays/prod).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kiosk-dev
+
+resources:
+  - ../../base
+
+images:
+  - name: ghcr.io/636b65/kiosk-microservices/auth-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/catalog-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/customer-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/order-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/settings-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/audit-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/report-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/system-service
+    newTag: main
+  - name: ghcr.io/636b65/kiosk-microservices/frontend
+    newTag: main
+
+secretGenerator:
+  - name: kiosk-secrets
+    literals:
+      - SECRET_KEY=dev-only-secret-key-change-me-0123456789abcdef0123
+      - INTERNAL_TOKEN=dev-only-internal-token-change-me-0123456789abcd
+      - PIN_PEPPER=dev-only-pin-pepper-change-me-0123456789abcdef01
+      - ADMIN_PASSWORD=dev-admin-password
+      - POSTGRES_PASSWORD=dev-postgres-password
+    options:
+      disableNameSuffixHash: true
+
+patches:
+  - target:
+      kind: Ingress
+      name: kiosk
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: kiosk.localtest.me

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kiosk-common"
+version = "1.0.0"
+description = "Shared building blocks for the kiosk microservices (config, DB, auth, HTTP clients, outbox)."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "sqlalchemy",
+    "pydantic",
+    "pydantic-settings",
+    "httpx",
+    "pyjwt",
+]
+
+[tool.setuptools.packages.find]
+include = ["kiosk_common*"]

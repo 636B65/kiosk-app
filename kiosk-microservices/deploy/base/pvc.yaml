@@ -1,0 +1,23 @@
+# Product images uploaded from the admin panel (served by the catalog service)
+# and the backup archives written by the system service. Both are ReadWriteOnce,
+# so those two Deployments run one replica with the Recreate strategy; use a
+# ReadWriteMany class (or object storage) to scale them out.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: product-images
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backups
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

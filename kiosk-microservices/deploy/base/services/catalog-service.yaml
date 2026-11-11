@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-service
+  labels:
+    app.kubernetes.io/name: catalog-service
+    app.kubernetes.io/component: service
+spec:
+  selector:
+    app.kubernetes.io/name: catalog-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-service
+  labels:
+    app.kubernetes.io/name: catalog-service
+    app.kubernetes.io/component: service
+spec:
+  replicas: 1
+  # ReadWriteOnce volume: one replica, replaced rather than rolled.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: catalog-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: catalog-service
+        app.kubernetes.io/component: service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ghcr.io/636b65/kiosk-microservices/catalog-service:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: kiosk-config
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kiosk-secrets
+                  key: SECRET_KEY
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: kiosk-secrets
+                  key: INTERNAL_TOKEN
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kiosk-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: postgresql+psycopg://kiosk:$(POSTGRES_PASSWORD)@postgres:5432/catalog
+            - name: IMAGES_DIR
+              value: /app/data/product_images
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /app/data
+            - name: product-images
+              mountPath: /app/data/product_images
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        - name: product-images
+          persistentVolumeClaim:
+            claimName: product-images

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kiosk-config
+data:
+  # Service discovery: the Kubernetes Service names (same as docker compose).
+  AUTH_SERVICE_URL: http://auth-service:8000
+  CATALOG_SERVICE_URL: http://catalog-service:8000
+  CUSTOMER_SERVICE_URL: http://customer-service:8000
+  ORDER_SERVICE_URL: http://order-service:8000
+  SETTINGS_SERVICE_URL: http://settings-service:8000
+  AUDIT_SERVICE_URL: http://audit-service:8000
+  REPORT_SERVICE_URL: http://report-service:8000
+  SYSTEM_SERVICE_URL: http://system-service:8000
+  # Browser origins allowed by CORS (empty = localhost only; the gateway makes
+  # the API same-origin, so this only matters for other front ends).
+  CORS_ORIGINS: ""
+  # Proxies that append to X-Forwarded-For before a service: ingress + gateway.
+  TRUSTED_PROXIES: "2"
+  LOG_LEVEL: INFO
+  DATA_DIR: /app/data
+  # How often the outbox relay delivers audit events (seconds).
+  OUTBOX_INTERVAL_SECONDS: "2"

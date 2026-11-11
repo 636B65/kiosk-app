@@ -1,0 +1,13 @@
+# Images are built from the repository root; keep the contexts small.
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/data/
+**/node_modules/
+.git/objects
+.git/logs
+.github
+deploy
+docs
+tests

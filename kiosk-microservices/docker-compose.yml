@@ -1,0 +1,165 @@
+# Local development stack: every microservice, one Postgres with a database per
+# service, and the frontend/gateway on http://localhost:8080.
+#
+#   SECRET_KEY=... INTERNAL_TOKEN=... PIN_PEPPER=... ADMIN_PASSWORD=... docker compose up --build
+#
+# Without SECRET_KEY/INTERNAL_TOKEN the services generate their own random
+# values and cannot talk to each other - set them (see .env.example).
+
+x-service: &service
+  build:
+    context: .
+    dockerfile: docker/service.Dockerfile
+    additional_contexts:
+      repo: .
+  environment: &service-env
+    SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (openssl rand -base64 48)}
+    INTERNAL_TOKEN: ${INTERNAL_TOKEN:?set INTERNAL_TOKEN (openssl rand -base64 48)}
+    CORS_ORIGINS: ${CORS_ORIGINS:-}
+    TRUSTED_PROXIES: "1"
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kiosk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kiosk-dev-password}
+      POSTGRES_DB: kiosk
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/base/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiosk -d kiosk"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  auth-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: auth-service }
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+psycopg://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/auth
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+
+  catalog-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: catalog-service }
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+psycopg://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/catalog
+      IMAGES_DIR: /app/data/product_images
+    volumes:
+      - product-images:/app/data/product_images
+
+  customer-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: customer-service }
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+psycopg://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/customers
+      PIN_PEPPER: ${PIN_PEPPER:?set PIN_PEPPER (>= 32 chars)}
+
+  order-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: order-service }
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+psycopg://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/orders
+
+  settings-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: settings-service }
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+psycopg://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/settings
+
+  audit-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: audit-service }
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgresql+psycopg://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/audit
+
+  report-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: report-service }
+    environment:
+      <<: *service-env
+
+  system-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      additional_contexts: { repo: . }
+      args: { SERVICE: system-service, PG_CLIENT_VERSION: "16" }
+    environment:
+      <<: *service-env
+      BACKUP_DIR: /app/data/backups
+      BACKUP_DATABASE_URLS: >-
+        auth=postgresql://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/auth,
+        catalog=postgresql://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/catalog,
+        customers=postgresql://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/customers,
+        orders=postgresql://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/orders,
+        settings=postgresql://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/settings,
+        audit=postgresql://kiosk:${POSTGRES_PASSWORD:-kiosk-dev-password}@postgres:5432/audit
+    volumes:
+      - backups:/app/data/backups
+
+  frontend:
+    build:
+      context: ./frontend
+      additional_contexts:
+        repo: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - catalog-service
+      - customer-service
+      - order-service
+      - settings-service
+      - audit-service
+      - report-service
+      - system-service
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  product-images:
+  backups:

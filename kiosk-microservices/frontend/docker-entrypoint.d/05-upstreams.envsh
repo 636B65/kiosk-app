@@ -1,0 +1,18 @@
+#!/bin/sh
+# Sourced by the nginx image entrypoint before the config template is rendered.
+# Defaults match the Kubernetes Service / docker compose service names; the DNS
+# resolver is read from the container so the same image works in both.
+set -e
+if [ -z "${NGINX_RESOLVER:-}" ]; then
+    NGINX_RESOLVER="$(awk '/^nameserver/ { printf "%s ", $2 }' /etc/resolv.conf)"
+    NGINX_RESOLVER="${NGINX_RESOLVER:-127.0.0.11}"
+    export NGINX_RESOLVER
+fi
+export NGINX_AUTH_SERVICE="${NGINX_AUTH_SERVICE:-auth-service:8000}"
+export NGINX_CATALOG_SERVICE="${NGINX_CATALOG_SERVICE:-catalog-service:8000}"
+export NGINX_CUSTOMER_SERVICE="${NGINX_CUSTOMER_SERVICE:-customer-service:8000}"
+export NGINX_ORDER_SERVICE="${NGINX_ORDER_SERVICE:-order-service:8000}"
+export NGINX_SETTINGS_SERVICE="${NGINX_SETTINGS_SERVICE:-settings-service:8000}"
+export NGINX_AUDIT_SERVICE="${NGINX_AUDIT_SERVICE:-audit-service:8000}"
+export NGINX_REPORT_SERVICE="${NGINX_REPORT_SERVICE:-report-service:8000}"
+export NGINX_SYSTEM_SERVICE="${NGINX_SYSTEM_SERVICE:-system-service:8000}"

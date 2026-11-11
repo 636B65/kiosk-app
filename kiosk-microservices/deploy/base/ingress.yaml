@@ -1,0 +1,22 @@
+# One Ingress to the frontend, which is also the API gateway (/api/* is routed
+# to the services inside the cluster). TLS terminates here: add a cert-manager
+# annotation and the tls section in your overlay.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kiosk
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 6m
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: kiosk.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  name: http

@@ -1,0 +1,134 @@
+name: Publish container images
+
+# Pushes to main publish every image as :main (what the dev overlay deploys);
+# a v* tag (pushed by release.yml or by hand) publishes :X.Y.Z and :latest and
+# creates the GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build, e.g. v1.0.3
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  # Owner must be lowercase for GHCR.
+  IMAGE_BASE: ghcr.io/636b65/kiosk-microservices
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  publish:
+    name: Build and publish (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - auth-service
+          - catalog-service
+          - customer-service
+          - order-service
+          - settings-service
+          - audit-service
+          - report-service
+          - system-service
+          - frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ startsWith(env.TAG, 'v') && format('refs/tags/{0}', env.TAG) || github.sha }}
+
+      - name: Resolve commit
+        id: rev
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_BASE }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.TAG }},enable=${{ startsWith(env.TAG, 'v') }}
+            type=raw,value=latest,enable=${{ startsWith(env.TAG, 'v') }}
+            type=raw,value=main,enable=${{ env.TAG == 'main' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.rev.outputs.sha }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image == 'frontend' && 'frontend' || '.' }}
+          file: ${{ matrix.image == 'frontend' && 'frontend/Dockerfile' || 'docker/service.Dockerfile' }}
+          platforms: linux/amd64,linux/arm64
+          build-contexts: |
+            repo=.
+          build-args: |
+            SERVICE=${{ matrix.image }}
+            PG_CLIENT_VERSION=${{ matrix.image == 'system-service' && '16' || '' }}
+            APP_VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ steps.rev.outputs.sha }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    name: Create GitHub Release
+    needs: publish
+    if: startsWith(inputs.tag || github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${TAG#v}"
+          notes="$RUNNER_TEMP/notes.md"
+          awk -v head="## [$version]" '
+            /^## \[/ { if (found) exit; if (index($0, head) == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > "$notes"
+          if ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error::CHANGELOG.md has no [$version] section"
+            exit 1
+          fi
+          prev="$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)"
+          if [ -n "$prev" ]; then
+            printf '\n**Full Changelog**: %s/%s/compare/%s...%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$prev" "$TAG" >> "$notes"
+          fi
+          cat "$notes"
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          fi

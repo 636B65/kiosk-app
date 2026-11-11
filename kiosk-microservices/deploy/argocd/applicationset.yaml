@@ -1,0 +1,44 @@
+# Alternative to the two Application files: one ApplicationSet that creates an
+# Application per environment directory under deploy/overlays/.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: kiosk
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - list:
+        elements:
+          - env: dev
+            namespace: kiosk-dev
+            automated: "true"
+          - env: prod
+            namespace: kiosk
+            automated: "false"
+  template:
+    metadata:
+      name: "kiosk-{{ .env }}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/636B65/kiosk-microservices.git
+        targetRevision: main
+        path: "deploy/overlays/{{ .env }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .namespace }}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+  templatePatch: |
+    {{- if eq .automated "true" }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}

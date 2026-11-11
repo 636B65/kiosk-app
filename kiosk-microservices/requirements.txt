@@ -1,0 +1,12 @@
+# Runtime dependencies shared by every service (one image base, see docker/service.Dockerfile).
+fastapi==0.162.4
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.8
+pydantic==2.14.3
+pydantic-settings==2.16.2
+psycopg[binary]==3.3.8
+httpx==0.28.1
+pyjwt==2.15.1
+bcrypt==5.0.0
+argon2-cffi==25.1.0
+python-multipart==0.0.33

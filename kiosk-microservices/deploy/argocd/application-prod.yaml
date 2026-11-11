@@ -1,0 +1,29 @@
+# Production: manual sync (no automated policy) so a release is a deliberate
+# click/CLI step after the image tags in overlays/prod were bumped.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kiosk-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/636B65/kiosk-microservices.git
+    targetRevision: main
+    path: deploy/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kiosk
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - PruneLast=true
+  ignoreDifferences:
+    # The Secret is managed outside Argo CD (see overlays/prod/secrets.example.yaml).
+    - kind: Secret
+      name: kiosk-secrets
+      jsonPointers:
+        - /data

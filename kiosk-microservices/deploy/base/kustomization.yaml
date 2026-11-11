@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Every kiosk pod carries these labels; the NetworkPolicies select on them.
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: kiosk
+    includeSelectors: false
+    includeTemplates: true
+
+resources:
+  - configmap.yaml
+  - pvc.yaml
+  - postgres/statefulset.yaml
+  - services/auth-service.yaml
+  - services/catalog-service.yaml
+  - services/customer-service.yaml
+  - services/order-service.yaml
+  - services/settings-service.yaml
+  - services/audit-service.yaml
+  - services/report-service.yaml
+  - services/system-service.yaml
+  - services/frontend.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+
+configMapGenerator:
+  - name: postgres-init
+    files:
+      - postgres/init.sql
+    options:
+      disableNameSuffixHash: true

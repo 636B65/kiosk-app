@@ -1,0 +1,81 @@
+# Kiosk frontend + API gateway.
+#
+# Serves the static kiosk UI and forwards /api/* to the service that owns the
+# path prefix. The upstream names are the Kubernetes Service / docker compose
+# service names, resolved lazily (variables + resolver) so nginx starts even
+# while a service is still rolling out. TLS terminates at the Ingress.
+#
+# Only ${NGINX_*} is substituted by the image entrypoint (NGINX_ENVSUBST_FILTER);
+# nginx's own $variables are left alone.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 8080;
+    server_name _;
+    server_tokens off;
+
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Image uploads allow up to 5 MB.
+    client_max_body_size 6m;
+
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+
+    set $auth_service      http://${NGINX_AUTH_SERVICE};
+    set $catalog_service   http://${NGINX_CATALOG_SERVICE};
+    set $customer_service  http://${NGINX_CUSTOMER_SERVICE};
+    set $order_service     http://${NGINX_ORDER_SERVICE};
+    set $settings_service  http://${NGINX_SETTINGS_SERVICE};
+    set $audit_service     http://${NGINX_AUDIT_SERVICE};
+    set $report_service    http://${NGINX_REPORT_SERVICE};
+    set $system_service    http://${NGINX_SYSTEM_SERVICE};
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_read_timeout 60s;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # --- API gateway: one prefix per service -------------------------------
+    location = /api/health         { proxy_pass $system_service; }
+    location ^~ /api/auth          { proxy_pass $auth_service; }
+    location ^~ /api/users         { proxy_pass $auth_service; }
+    location ^~ /api/categories    { proxy_pass $catalog_service; }
+    location ^~ /api/products      { proxy_pass $catalog_service; }
+    location ^~ /api/restocks      { proxy_pass $catalog_service; }
+    location ^~ /api/inventory     { proxy_pass $catalog_service; }
+    location ^~ /api/images        { proxy_pass $catalog_service; }
+    location ^~ /api/customers     { proxy_pass $customer_service; }
+    location ^~ /api/orders        { proxy_pass $order_service; }
+    location ^~ /api/settings      { proxy_pass $settings_service; }
+    location ^~ /api/audit         { proxy_pass $audit_service; }
+    location ^~ /api/reports       { proxy_pass $report_service; }
+    location ^~ /api/system        { proxy_pass $system_service; }
+
+    # Anything else under /api/ (including every service's /internal/ routes,
+    # which are never proxied) is unknown to the gateway.
+    location /api/ {
+        default_type application/json;
+        return 404 '{"detail":"Not Found"}';
+    }
+    location /internal/ {
+        default_type application/json;
+        return 404 '{"detail":"Not Found"}';
+    }
+}

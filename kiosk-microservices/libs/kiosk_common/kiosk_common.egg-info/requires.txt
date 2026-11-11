@@ -1,0 +1,6 @@
+fastapi
+sqlalchemy
+pydantic
+pydantic-settings
+httpx
+pyjwt
