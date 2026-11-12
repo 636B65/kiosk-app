@@ -2,5 +2,5 @@
 # Test + quality tooling
 pytest==9.2.0
 httpx2==2.16.0
-ruff==0.17.3
+ruff==0.17.4
 mypy==2.4.1
