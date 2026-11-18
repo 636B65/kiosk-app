@@ -35,6 +35,10 @@ updates:
     commit-message:
       prefix: "deps(docker)"
       include: "scope"
+    ignore:
+      # The backend targets Python 3.12; a new Python is a deliberate change.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   # GitHub Actions workflows (pinned to commit SHAs; the version is the comment)
   - package-ecosystem: "github-actions"
