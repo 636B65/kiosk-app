@@ -376,8 +376,9 @@ load skills.
 
 ## Supply chain (OpenSSF Scorecard)
 
-- `scorecard.yml`, `codeql.yml` and `cflite.yml` (ClusterFuzzLite, Atheris fuzzers in
-  `tests/fuzz/`, built by `.clusterfuzzlite/build.sh`) keep the Scorecard high.
+- `scorecard.yml` and `cflite.yml` (ClusterFuzzLite, Atheris fuzzers in `tests/fuzz/`, built
+  by `.clusterfuzzlite/build.sh`) keep the Scorecard high. CodeQL runs as GitHub's *default
+  setup* (repository settings); do not add a CodeQL workflow, the two cannot coexist.
 - Workflows: top-level `permissions` read-only, write scopes per job; every `uses:` pinned
   to a full commit SHA with the version as a comment; untrusted `${{ }}` values only via
   `env:`; `actions/checkout` with `persist-credentials: false` unless the job pushes.

@@ -1,7 +1,6 @@
 # Kiosk App
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/636B65/kiosk-app/badge)](https://scorecard.dev/viewer/?uri=github.com/636B65/kiosk-app)
-[![CodeQL](https://github.com/636B65/kiosk-app/actions/workflows/codeql.yml/badge.svg)](https://github.com/636B65/kiosk-app/actions/workflows/codeql.yml)
 
 A self-service retail kiosk with a customer-facing ordering screen and an admin
 panel. Customers browse products, put them in a cart, and buy on a credit/tab
@@ -306,7 +305,7 @@ The e2e harness spawns its own backend and a static/proxy server, then drives
 
 Report vulnerabilities privately, see [SECURITY.md](SECURITY.md). The repository is
 checked by [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/636B65/kiosk-app),
-CodeQL and ClusterFuzzLite (fuzzers in `tests/fuzz/`). Actions are pinned to commit SHAs,
+CodeQL (GitHub's default setup) and ClusterFuzzLite (fuzzers in `tests/fuzz/`). Actions are pinned to commit SHAs,
 base images to digests and Python dependencies to hashes (Dependabot keeps them current),
 and published images carry signed build provenance:
 `gh attestation verify oci://ghcr.io/636b65/kiosk/backend:<version> -R 636B65/kiosk-app`.

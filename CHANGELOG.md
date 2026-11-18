@@ -16,8 +16,8 @@ stay backwards compatible, **PATCH** for bug and security fixes only.
   before). Workflows run with read-only tokens unless a job needs more.
 - Published images get signed build provenance attestations (`gh attestation verify`), and
   each GitHub Release a provenance file (`*.intoto.jsonl`) for its image digests.
-- New checks: OpenSSF Scorecard, CodeQL (Python, JavaScript, Actions) and ClusterFuzzLite
-  with Atheris fuzzers for usernames, PINs, CSV cells, request payloads and due dates.
+- New checks: OpenSSF Scorecard and ClusterFuzzLite (CodeQL already runs as GitHub's default
+  setup) with Atheris fuzzers for usernames, PINs, CSV cells, request payloads and due dates.
 - `SECURITY.md` with private vulnerability reporting; Dependabot now also updates the base
   image digests (Python stays on 3.12).
 - The project is licensed under the MIT license (`LICENSE`).
