@@ -3,7 +3,8 @@
 
 version: 2
 updates:
-  # Python backend (requirements.txt + requirements-dev.txt)
+  # Python backend: pip-compile lock files (requirements*.in -> hash-locked *.txt);
+  # Dependabot regenerates them with hashes.
   - package-ecosystem: "pip"
     directory: "/backend"
     schedule:
@@ -26,7 +27,16 @@ updates:
       prefix: "deps(npm)"
       include: "scope"
 
-  # GitHub Actions workflows
+  # Base images (pinned by digest) of the two images and the fuzzing build.
+  - package-ecosystem: "docker"
+    directories: ["/backend", "/frontend", "/.clusterfuzzlite"]
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(docker)"
+      include: "scope"
+
+  # GitHub Actions workflows (pinned to commit SHAs; the version is the comment)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

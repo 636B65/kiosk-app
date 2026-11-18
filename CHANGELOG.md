@@ -6,6 +6,25 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.5.1] - 2026-11-18
+
+### Security
+- **Supply-chain hardening (OpenSSF Scorecard).** Every GitHub Action is pinned to a commit
+  SHA, the Docker base images (`python:3.12-slim`, `nginx:alpine`) to digests, and the
+  Python dependencies to hashes: `backend/requirements*.txt` are now pip-compile lock files
+  generated from `requirements*.in` and installed with `--require-hashes` (same versions as
+  before). Workflows run with read-only tokens unless a job needs more.
+- Published images get signed build provenance attestations (`gh attestation verify`), and
+  each GitHub Release a provenance file (`*.intoto.jsonl`) for its image digests.
+- New checks: OpenSSF Scorecard, CodeQL (Python, JavaScript, Actions) and ClusterFuzzLite
+  with Atheris fuzzers for usernames, PINs, CSV cells, request payloads and due dates.
+- `SECURITY.md` with private vulnerability reporting; Dependabot now also updates the base
+  image digests.
+
+### Tests
+- Backend: 88 tests (unchanged); 4 Atheris fuzz targets in `tests/fuzz/` (ClusterFuzzLite on
+  pull requests and weekly).
+
 ## [1.5.0] - 2026-11-09
 
 ### Added

@@ -239,8 +239,10 @@ tests/e2e/
   check (`_DUMMY_HASH`) so timing does not reveal valid usernames.
 - Schema responses via Pydantic v2 (`model_validate`, `ConfigDict(from_attributes=True)` in schemas.py).
 - `money = round(x, 2)` floats; keep it consistent.
-- Do NOT modify `backend/requirements.txt` / `requirements-dev.txt` unless you also update
-  the Dockerfiles pin-worthy versions — every dependency pinned there is used by Docker/CI.
+- Dependencies are pip-compile lock files: edit `backend/requirements.in` /
+  `requirements-dev.in`, then regenerate the hash-locked `.txt` files with
+  `pip-compile --generate-hashes --allow-unsafe <file>.in` (Python 3.12). Docker and CI install
+  them with `pip install --require-hashes -r ...`; never hand-edit the `.txt` files.
 
 ## Frontend conventions
 
@@ -358,7 +360,7 @@ public: the README's pull instructions have no `docker login` step.
 - Local Python is frequently newer than 3.12; the pinned `requirements.txt` wheels may lack
   compatibility → install first `fastapi pydantic sqlalchemy uvicorn python-multipart
   pyjwt bcrypt pytest ruff mypy` as latest (loose) when developing locally, but never change
-  the pinned requirement files themselves.
+  the pinned requirement files themselves (only the `.in` files + pip-compile, see above).
 - The Docker+TLS smoke job needs a Docker daemon and cannot run on a machine without one —
   run it in CI or `docker compose up` locally.
 - `#app` + admin views render via JS; there are no server-side templates.
@@ -371,6 +373,17 @@ Keep matching skill names and contents synchronized across these directories. Th
 `kiosk-development`, `kiosk-testing`, and `kiosk-release` skills cover common repo work;
 this `AGENTS.md` remains the shared source of project conventions for agents that do not
 load skills.
+
+## Supply chain (OpenSSF Scorecard)
+
+- `scorecard.yml`, `codeql.yml` and `cflite.yml` (ClusterFuzzLite, Atheris fuzzers in
+  `tests/fuzz/`, built by `.clusterfuzzlite/build.sh`) keep the Scorecard high.
+- Workflows: top-level `permissions` read-only, write scopes per job; every `uses:` pinned
+  to a full commit SHA with the version as a comment; untrusted `${{ }}` values only via
+  `env:`; `actions/checkout` with `persist-credentials: false` unless the job pushes.
+- Dockerfile `FROM` lines are pinned by digest (Dependabot updates digests, actions and pip).
+- Releases get build provenance attestations (images on GHCR + `*.intoto.jsonl` asset).
+- Report vulnerabilities privately (SECURITY.md).
 
 ## Workflow conventions
 
