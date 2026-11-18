@@ -35,11 +35,16 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       release: ${{ steps.version.outputs.release }}
     steps:
-      - name: Checkout tested commit
-        uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
+
+      # The commit CI tested (a push to main in this repository, see `if:` above).
+      - name: Select the tested commit
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: git checkout --quiet --detach "$TESTED_SHA"
 
       - name: Read newest CHANGELOG.md version
         id: version
@@ -75,6 +80,9 @@ jobs:
     uses: ./.github/workflows/publish-images.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}
+    # Everything the called publish workflow's jobs ask for (images + provenance).
     permissions:
       contents: write
       packages: write
+      id-token: write
+      attestations: write

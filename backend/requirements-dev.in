@@ -1,0 +1,7 @@
+# Test + quality tooling. Regenerate requirements-dev.txt after editing:
+#   pip-compile --generate-hashes --allow-unsafe requirements-dev.in
+-r requirements.in
+pytest==9.2.0
+httpx2==2.16.0
+ruff==0.17.3
+mypy==2.4.1

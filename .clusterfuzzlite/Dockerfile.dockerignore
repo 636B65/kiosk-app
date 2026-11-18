@@ -1,0 +1,11 @@
+# Build context for the fuzzing image only (BuildKit uses this file instead of
+# the root .dockerignore for .clusterfuzzlite/Dockerfile): the whole source tree,
+# without caches and git objects.
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/node_modules
+**/data
+.git/objects
+.git/logs
