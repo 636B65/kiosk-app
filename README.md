@@ -310,3 +310,7 @@ CodeQL and ClusterFuzzLite (fuzzers in `tests/fuzz/`). Actions are pinned to com
 base images to digests and Python dependencies to hashes (Dependabot keeps them current),
 and published images carry signed build provenance:
 `gh attestation verify oci://ghcr.io/636b65/kiosk/backend:<version> -R 636B65/kiosk-app`.
+
+## License
+
+[MIT](LICENSE)

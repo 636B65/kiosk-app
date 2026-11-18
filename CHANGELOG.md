@@ -19,7 +19,8 @@ stay backwards compatible, **PATCH** for bug and security fixes only.
 - New checks: OpenSSF Scorecard, CodeQL (Python, JavaScript, Actions) and ClusterFuzzLite
   with Atheris fuzzers for usernames, PINs, CSV cells, request payloads and due dates.
 - `SECURITY.md` with private vulnerability reporting; Dependabot now also updates the base
-  image digests.
+  image digests (Python stays on 3.12).
+- The project is licensed under the MIT license (`LICENSE`).
 
 ### Tests
 - Backend: 88 tests (unchanged); 4 Atheris fuzz targets in `tests/fuzz/` (ClusterFuzzLite on
