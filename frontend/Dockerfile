@@ -1,7 +1,10 @@
-FROM nginx:alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72
+# nginx 1.31.9 (mainline): fixes CVE-2026-123007/-123633/-121810 (HTTP/2, HTTP/3),
+# CVE-2026-125283 (try_files + alias) and more; see the 1.5.2 CHANGELOG entry.
+FROM nginx:alpine@sha256:fb4658584bd9a916ffb6f6e365f97c25cfdb2923801f551ea08356e695f14ff7
 
+# Pick up Alpine security fixes released after the base image was built;
 # openssl is needed to generate the self-signed TLS certificate on first start.
-RUN apk add --no-cache openssl
+RUN apk upgrade --no-cache && apk add --no-cache openssl
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint.d/ /docker-entrypoint.d/

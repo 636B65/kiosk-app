@@ -1,12 +1,12 @@
 # Backend runtime dependencies. Edit this file, then regenerate the hash-locked
 # requirements.txt (both Docker images and CI install it with --require-hashes):
 #   pip-compile --generate-hashes --allow-unsafe requirements.in
-fastapi==0.163.1
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
-sqlalchemy==2.1.8
-pydantic==2.14.3
+sqlalchemy==2.1.9
+pydantic==2.14.4
 pydantic-settings==2.16.3
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 pyjwt==2.15.1
-python-multipart==0.0.33
+python-multipart==0.0.34
