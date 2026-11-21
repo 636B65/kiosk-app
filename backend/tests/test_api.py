@@ -1658,7 +1658,8 @@ def test_pin_is_stored_as_peppered_argon2id(client, products):
     from models import Customer
 
     _pin_customer(client, products, "pin_storage")
-    for bad in ("123", "123456789", "12a4", "", " 1234"):
+    # "1234\n" used to pass: "$" also matches before a trailing newline.
+    for bad in ("123", "123456789", "12a4", "", " 1234", "1234 ", "1234\n", "12345678\n", "١٢٣٤"):
         r = client.post("/api/customers/pin_storage/pin", json={"pin": bad})
         assert r.status_code == 422, bad
     assert client.post("/api/customers/pin_storage/pin", json={"pin": "4821"}).json() == {

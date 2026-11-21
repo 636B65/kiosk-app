@@ -6,6 +6,19 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.5.3] - 2026-11-21
+
+### Fixed
+- **Customer PINs with a trailing newline were accepted.** `"1234\n"` passed the 4-8 digit
+  rule, because the regular expression's `$` also matches before a final newline. A PIN set
+  that way could never be typed at the kiosk again, so the customer was locked out until staff
+  removed it with Reset PIN. The check now requires the whole value to be digits
+  (`re.fullmatch`). Found by ClusterFuzzLite in kiosk-app-ms, which shares this code.
+
+### Tests
+- Backend: 88 tests; the PIN validation test now also rejects trailing newlines, trailing
+  spaces and non-ASCII digits.
+
 ## [1.5.2] - 2026-11-21
 
 ### Security
