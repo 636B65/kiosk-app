@@ -6,6 +6,25 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.5.2] - 2026-11-21
+
+### Security
+- **nginx 1.31.8 -> 1.31.9** in the frontend image. 1.31.9 fixes, among others, a buffer
+  overflow with `try_files` + `alias` (CVE-2026-125283), an HTTP/2 flow-control window
+  overflow (CVE-2026-123007), use-after-free in HTTP/2 and HTTP/3 when worker_connections run
+  out (CVE-2026-123633, CVE-2026-121810), a resolver use-after-free (CVE-2026-123634) and SNI
+  confusion for stream client certificates (CVE-2026-120967). The kiosk serves HTTP/2 and uses
+  `try_files`, so upgrade.
+- Both images now apply the OS security updates published after their base image was built
+  (`apk upgrade` / `apt-get upgrade` at build time).
+- Python dependencies updated: fastapi 0.165.0, SQLAlchemy 2.1.9, pydantic 2.14.4,
+  python-multipart 0.0.34 (plus their dependencies); dev: ruff 0.17.6, httpx2 2.16.2.
+  `pip-audit` reports no known vulnerabilities in the lock files.
+- Workflow actions updated: ossf/scorecard-action 2.6.0.
+
+### Tests
+- Backend: 88 tests (unchanged).
+
 ## [1.5.1] - 2026-11-18
 
 ### Security
