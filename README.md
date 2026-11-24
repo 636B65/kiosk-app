@@ -1,6 +1,25 @@
 # Kiosk App
 
+[![CI](https://github.com/636B65/kiosk-app/actions/workflows/ci.yml/badge.svg)](https://github.com/636B65/kiosk-app/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/636B65/kiosk-app?sort=semver&logo=github)](https://github.com/636B65/kiosk-app/releases/latest)
+[![Live demo](https://github.com/636B65/kiosk-app/actions/workflows/pages.yml/badge.svg)](https://636b65.github.io/kiosk-app/)
+[![Last commit](https://img.shields.io/github/last-commit/636B65/kiosk-app?logo=git&logoColor=white)](https://github.com/636B65/kiosk-app/commits/main)
+[![License: MIT](https://img.shields.io/github/license/636B65/kiosk-app)](LICENSE)
+
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/636B65/kiosk-app/badge)](https://scorecard.dev/viewer/?uri=github.com/636B65/kiosk-app)
+[![Scorecard workflow](https://github.com/636B65/kiosk-app/actions/workflows/scorecard.yml/badge.svg)](https://github.com/636B65/kiosk-app/actions/workflows/scorecard.yml)
+[![ClusterFuzzLite](https://github.com/636B65/kiosk-app/actions/workflows/cflite.yml/badge.svg)](https://github.com/636B65/kiosk-app/actions/workflows/cflite.yml)
+[![Build provenance](https://img.shields.io/badge/build%20provenance-attested-brightgreen?logo=github)](SECURITY.md)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-025E8C?logo=dependabot&logoColor=white)](.github/dependabot.yml)
+[![Security policy](https://img.shields.io/badge/security-policy-blue?logo=github)](SECURITY.md)
+
+[![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](backend/Dockerfile)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+[![nginx](https://img.shields.io/badge/nginx-009639?logo=nginx&logoColor=white)](frontend/nginx.conf)
+[![Docker images on GHCR](https://img.shields.io/badge/ghcr.io-backend%20%7C%20frontend-2496ED?logo=docker&logoColor=white)](https://github.com/636B65?tab=packages&repo_name=kiosk-app)
+[![E2E: Playwright](https://img.shields.io/badge/e2e-Playwright-2EAD33?logo=playwright&logoColor=white)](tests/e2e)
+[![Microservice edition](https://img.shields.io/badge/edition-microservices%20for%20Kubernetes-326CE5?logo=kubernetes&logoColor=white)](https://github.com/636B65/kiosk-app-ms)
 
 A self-service retail kiosk with a customer-facing ordering screen and an admin
 panel. Customers browse products, put them in a cart, and buy on a credit/tab
