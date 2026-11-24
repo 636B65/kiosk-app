@@ -6,6 +6,20 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.5.4] - 2026-11-24
+
+### Security
+- **nginx 1.31.9 -> 1.31.10** in the frontend image. It fixes CVE-2026-132779 (excessive CPU
+  with `ssl_early_data`; the shipped config does not enable early data, but custom configs
+  might) and CPU hogging with SSL connections to backends.
+- **Python 3.12.15 -> 3.12.16** in the backend image (latest `python:3.12-slim`), and the
+  current ClusterFuzzLite base image. Both images still apply OS security updates at build time.
+- github/codeql-action 4.39.5 (Scorecard SARIF upload).
+- The Python dependencies are already current; `pip-audit` reports no known vulnerabilities.
+
+### Tests
+- Backend: 88 tests (unchanged).
+
 ## [1.5.3] - 2026-11-21
 
 ### Fixed
