@@ -181,6 +181,38 @@ server.listen(PORT, async () => {
     if (!res.ok) throw new Error("failed to set customer self-service payment: " + res.status);
   }
 
+  // Wait until the backend has stored a setting (poll from Node: a page.waitForFunction with an
+  // async predicate would not wait for the request, and navigating away cancels a running save).
+  async function waitForSettings(predicate, what, timeout = 7000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const settings = await (await fetch(`http://${BACKEND}/api/settings`)).json();
+      if (predicate(settings)) return settings;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new Error("timed out waiting for " + what);
+  }
+
+  // A customer buys on credit (through the public API, like the kiosk does).
+  async function placeOrder(username, quantity = 1) {
+    const products = await (await fetch(`http://${BACKEND}/api/products`)).json();
+    const product = products.find((p) => p.name === "Bottled Water") || products.find((p) => p.stock >= quantity);
+    const res = await fetch(`http://${BACKEND}/api/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customer_username: username, items: [{ product_id: product.id, quantity }] }),
+    });
+    if (!res.ok) throw new Error(`order for ${username} failed: ${res.status}`);
+    return res.json();
+  }
+
+  // "1 234,50 €" / "−5,00 €" / "+0,00 €" -> number (sv-SE formatting, U+2212 minus).
+  const money = (text) => {
+    const m = text.replace(/\u2212/g, "-").replace(/[\s\u00a0\u202f]/g, "").match(/-?\d+(?:[.,]\d+)?/);
+    if (!m) throw new Error("no amount in: " + text);
+    return parseFloat(m[0].replace(",", "."));
+  };
+
   try {
     // ---- CUSTOMER FLOW ----
     await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
@@ -526,6 +558,7 @@ server.listen(PORT, async () => {
 
     await step("admin: reset payment clears balance", async () => {
       await page.locator("#reset-from-modal").click();
+      await page.locator("#confirm-reset").click(); // the dialog also takes an optional extra amount
       await page.waitForSelector(".toast.success", { timeout: 5000 });
       await page.waitForTimeout(700);
       const row = page.locator("tr", { hasText: "alice" });
@@ -1071,6 +1104,180 @@ server.listen(PORT, async () => {
       await page.waitForFunction(() => ![...document.querySelectorAll("tbody tr")]
         .some((tr) => tr.textContent.includes("pin_e2e") && tr.textContent.includes("🔒")));
       return "reset blocked while unpaid, allowed after payment";
+    });
+
+    // ---- MONEY: purchases, extra payments, store balance ----
+    const moneyBalance = async () => money(await page.locator("#money-balance").textContent());
+    const waitMoneyBalance = async (expected) => {
+      const deadline = Date.now() + 7000;
+      let last = NaN;
+      while (Date.now() < deadline) {
+        last = await moneyBalance().catch(() => NaN);
+        if (Math.abs(last - expected) < 0.006) return last;
+        await page.waitForTimeout(150);
+      }
+      throw new Error(`store balance is ${last}, expected ${expected}`);
+    };
+
+    await step("admin: a purchase lowers the store balance, also when entered afterwards with an earlier date", async () => {
+      await adminView("money", "#money-balance");
+      const before = await moneyBalance();
+      const earlier = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
+      await page.locator('[data-action="admin-add-purchase"]').click();
+      await page.fill("#pu-amount", "50");
+      await page.fill("#pu-date", earlier);
+      await page.fill("#pu-supplier", "E2E Wholesale");
+      await page.fill("#pu-note", "chips and cola");
+      await page.locator('#purchase-form button[type="submit"]').click();
+      const row = page.locator("#purchases-panel tbody tr", { hasText: "E2E Wholesale" });
+      await row.waitFor({ timeout: 7000 });
+      if (!(await row.textContent()).includes(earlier)) throw new Error("purchase date not shown: " + (await row.textContent()));
+      await waitMoneyBalance(before - 50);
+      // The value of an earlier batch is corrected later.
+      await row.locator('[data-action="admin-edit-purchase"]').click();
+      await page.fill("#pu-amount", "62.5");
+      await page.locator('#purchase-form button[type="submit"]').click();
+      await waitMoneyBalance(before - 62.5);
+      // The dashboard shows where the store stands too.
+      await adminView("dashboard", ".stats-grid");
+      const card = (await page.locator(".stat-card", { hasText: "Store balance" }).textContent()).replace(/\s+/g, " ");
+      if (!/if everyone pays|everyone has paid/.test(card)) throw new Error("store balance card: " + card);
+      return `balance ${before.toFixed(2)} -> ${(before - 62.5).toFixed(2)} after a 62.50 purchase dated ${earlier}`;
+    });
+
+    await step("admin: reset payment books what the customer paid on top, not as credit", async () => {
+      const order = await placeOrder("extra_e2e");
+      await adminView("money", "#money-balance");
+      const before = await moneyBalance();
+      await adminView("customers", "#admin-main-container table");
+      const row = () => page.locator("tbody tr").filter({ has: page.locator("td:first-child", { hasText: /^\s*extra_e2e/ }) });
+      await row().locator(".reset-payment").click();
+      await page.fill("#rp-extra", "2.5");
+      await page.fill("#rp-note", "keep the change");
+      await page.locator("#confirm-reset").click();
+      await page.waitForSelector(".toast.success >> text=extra", { timeout: 5000 });
+      await page.waitForFunction(() => [...document.querySelectorAll("tbody tr")]
+        .some((tr) => tr.textContent.includes("extra_e2e") && /\b0,00/.test(tr.querySelectorAll("td")[6].textContent)));
+      const owed = (await row().locator("td").nth(6).textContent()).replace(/\s+/g, "");
+      if (owed !== "0,00€") throw new Error("the extra payment must not change the customer's balance: " + owed);
+      await adminView("money", "#extras-panel");
+      const extra = page.locator("#extras-panel tbody tr", { hasText: "extra_e2e" });
+      await extra.waitFor({ timeout: 7000 });
+      if (money(await extra.locator("td").nth(3).textContent()) !== 2.5) throw new Error("extra amount: " + (await extra.textContent()));
+      await waitMoneyBalance(before + order.total + 2.5);
+      return `balance +${order.total.toFixed(2)} paid +2.50 extra`;
+    });
+
+    await step("admin: the money page says plus, minus or even once everyone has paid", async () => {
+      await adminView("customers", "#admin-main-container table");
+      for (;;) {
+        const reset = page.locator(".reset-payment").first();
+        if ((await reset.count()) === 0) break;
+        await reset.click();
+        await page.locator("#confirm-reset").click();
+        await page.waitForTimeout(500);
+      }
+      await adminView("money", "#money-summary");
+      const text = (await page.locator("#money-summary").textContent()).replace(/\s+/g, " ");
+      if (!text.includes("Everyone has paid")) throw new Error("not settled: " + text);
+      const balance = await moneyBalance();
+      const word = balance === 0 ? "even" : balance > 0 ? "in plus" : "in minus";
+      if (!text.includes(word)) throw new Error(`summary "${text}" does not say ${word} for ${balance}`);
+      return `everyone paid: ${word} (${balance.toFixed(2)})`;
+    });
+
+    // ---- PAY: how customers can pay ----
+    await step("customer: no Pay button until the admin sets up a payment method", async () => {
+      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".product-card");
+      if ((await page.locator("#pay-btn").count()) !== 0) throw new Error("Pay shown without payment methods");
+      return "hidden";
+    });
+
+    await step("admin: payment methods are chosen in settings and shown by the kiosk's Pay button", async () => {
+      await adminView("settings", "#pay-methods-editor");
+      await page.fill("#s-pay_instructions", "Pay within 14 days");
+      await page.locator("#pay-add").click();
+      await page.locator('[data-pay-row="0"] [data-field="label"]').fill("Swish");
+      await page.locator('[data-pay-row="0"] [data-field="value"]').fill("070-111 22 33");
+      await page.locator('[data-pay-row="0"] [data-field="note"]').fill("Write your username as the message");
+      await page.locator("#pay-add").click();
+      await page.locator('[data-pay-row="1"] [data-field="type"]').selectOption("bank");
+      await page.locator('[data-pay-row="1"] [data-field="label"]').fill("Bank transfer");
+      await page.locator('[data-pay-row="1"] [data-field="value"]').fill("SE12 3456 7890 1234");
+      await page.locator('[data-action="admin-save-settings"]').evaluate((el) => el.click());
+      await waitForSettings(
+        (settings) => JSON.parse(settings.payment_methods || "[]").length === 2 && settings.pay_instructions === "Pay within 14 days",
+        "two payment methods and the instruction"
+      );
+
+      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+      await page.waitForSelector("#pay-btn", { timeout: 7000 });
+      await page.locator("#pay-btn").click();
+      await page.waitForSelector(".pay-method");
+      const text = (await page.locator("#modal-overlay").textContent()).replace(/\s+/g, " ");
+      for (const expected of ["Pay within 14 days", "Swish", "070-111 22 33", "Write your username as the message", "Bank transfer", "SE12 3456 7890 1234"]) {
+        if (!text.includes(expected)) throw new Error(`Pay dialog misses "${expected}": ${text}`);
+      }
+      await page.locator('#modal-overlay [data-action="modal-close"]').click();
+      await page.waitForSelector("#modal-overlay", { state: "detached" });
+      return "Pay shows instructions, Swish and bank details";
+    });
+
+    await step("customer: Pay from the lookup shows the amount and asks for the username as message", async () => {
+      const order = await placeOrder("pay_e2e");
+      await page.locator("#lookup-btn").click();
+      await page.fill("#lk-username", "pay_e2e");
+      await page.locator('#lookup-form button[type="submit"]').click();
+      await page.waitForSelector("#modal-overlay .balance-big", { timeout: 7000 });
+      await page.locator('#modal-overlay [data-action="kiosk-open-pay"]').click();
+      await page.waitForSelector(".pay-reference");
+      const text = (await page.locator("#modal-overlay").textContent()).replace(/\s+/g, " ");
+      if (!text.includes("Write pay_e2e as the message")) throw new Error("no reference hint: " + text);
+      if (Math.abs(money(await page.locator("#modal-overlay .balance-big").textContent()) - order.total) > 0.005) {
+        throw new Error("amount missing: " + text);
+      }
+      await page.locator('#modal-overlay [data-action="kiosk-pay-back"]').click();
+      await page.waitForSelector("#modal-overlay .history-order", { timeout: 7000 });
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#modal-overlay", { state: "detached" });
+      return `Pay for ${order.total.toFixed(2)} with the username as message; Back returns to the lookup`;
+    });
+
+    await step("admin: a QR code can be uploaded and the kiosk shows it", async () => {
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "base64"
+      );
+      await adminView("settings", "#pay-methods-editor");
+      await page.locator("#pay-add").click();
+      await page.locator('[data-pay-row="2"] [data-field="type"]').selectOption("qr");
+      await page.locator('[data-pay-row="2"] [data-field="label"]').fill("Swish QR");
+      await page.locator('[data-pay-row="2"] input[type="file"]').setInputFiles({ name: "qr.png", mimeType: "image/png", buffer: png });
+      await page.waitForSelector('[data-pay-row="2"] .pay-edit-preview', { timeout: 7000 });
+      await page.locator('[data-action="admin-save-settings"]').evaluate((el) => el.click());
+      await waitForSettings((settings) => {
+        const methods = JSON.parse(settings.payment_methods || "[]");
+        return methods.length === 3 && /^pay-[0-9a-f]{32}\.png$/.test(methods[2].image);
+      }, "three payment methods with an uploaded QR code");
+      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+      await page.locator("#pay-btn").click();
+      await page.waitForSelector("img.pay-qr");
+      const loaded = await page.locator("img.pay-qr").evaluate((img) => img.complete && img.naturalWidth > 0);
+      if (!loaded) throw new Error("the QR code image did not load");
+      await page.keyboard.press("Escape");
+      return "QR code uploaded, saved and shown at the kiosk";
+    });
+
+    await step("admin: hiding or removing every payment method hides the Pay button again", async () => {
+      await setSetting("payment_methods", "[]");
+      await setSetting("pay_instructions", "");
+      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".product-card");
+      if ((await page.locator("#pay-btn").count()) !== 0) throw new Error("Pay still shown");
+      const gone = await page.evaluate(async () => (await fetch("/api/settings")).json());
+      if (gone.payment_methods !== "[]") throw new Error("settings not cleared");
+      return "Pay hidden";
     });
   } catch (e) {
     results.push("FAIL  outer — " + e.message);

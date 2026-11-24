@@ -355,6 +355,59 @@ class SettingIn(BaseModel):
     value: str
 
 
+MAX_MONEY_AMOUNT = 10_000_000
+
+
+class PurchaseIn(BaseModel):
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
+    # Any past date: a batch bought earlier can be entered afterwards. Default today (UTC).
+    purchased_on: Optional[date] = None
+    supplier: str = Field(default="", max_length=100)
+    note: str = Field(default="", max_length=200)
+
+
+class PurchaseUpdate(BaseModel):
+    amount: Optional[float] = Field(default=None, gt=0, le=MAX_MONEY_AMOUNT)
+    purchased_on: Optional[date] = None
+    supplier: Optional[str] = Field(default=None, max_length=100)
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class PurchaseOut(BaseModel):
+    id: int
+    purchased_on: date
+    amount: float
+    supplier: str = ""
+    note: str = ""
+    created_by: str = ""
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExtraPaymentIn(BaseModel):
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
+    note: str = Field(default="", max_length=200)
+
+
+class ExtraPaymentOut(BaseModel):
+    id: int
+    username: str
+    amount: float
+    note: str = ""
+    created_by: str = ""
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ResetPaymentIn(BaseModel):
+    """Optional body of reset-payment: what the customer paid on top of the debt."""
+
+    extra_amount: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY_AMOUNT)
+    note: str = Field(default="", max_length=200)
+
+
 class UserOut(BaseModel):
     id: int
     username: str

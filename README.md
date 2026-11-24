@@ -66,6 +66,9 @@ sample data. Everything lives in your browser and **resets on reload**.
 - The cursor jumps to the username (and PIN) field on Buy and User lookup; Esc closes
   dialogs
 - Self-scanning of product barcodes at the kiosk, off by default (Settings)
+- "Pay": a button (shown once the admin has set up at least one payment method) that tells the
+  customer how to pay: bank account, a phone number (e.g. Swish), a QR code, a link or free
+  text. From the user lookup it also shows the amount and asks for the username as the message
 - Light and dark mode: the footer's theme switch picks Auto (follow the device), Light or
   Dark, remembered per browser
 - Idle reset: after a configurable time without a touch (default 90 s) the kiosk
@@ -94,6 +97,15 @@ sample data. Everything lives in your browser and **resets on reload**.
 - Reorder suggestions from the recent sales pace and each product's low-stock threshold,
   with estimated cost, CSV export and print view
 - Printable account statement per customer and month (purchases, payments, balance)
+- Money: enter what you bought in (a purchase can be entered afterwards with its real date and
+  corrected later). Customers buy on credit, and as orders are marked paid the money lands in
+  the store balance, so once everyone has paid you see if the store ended in plus, minus or
+  even; until then it shows where you end if everyone pays
+- Extra payments: when a customer pays more than they owe, Reset payment takes the extra amount.
+  It is store income that covers shrinkage (not credit on the customer), compared with the
+  shrinkage found by counts
+- Payment info for the kiosk's Pay button is chosen in Settings: bank account, phone number,
+  QR code (uploaded image), link or text, each shown or hidden
 - Audit log: who marked orders paid or cancelled, reset or self-marked payments,
   changed products, prices, stock, settings or users, and took backups, and when
 - System page: backend/frontend version, uptime, database size, counts, and backups

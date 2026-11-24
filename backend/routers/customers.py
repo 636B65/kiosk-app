@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -11,15 +11,18 @@ import audit
 import pins
 from database import get_db
 from due_dates import get_due_date
-from models import Customer, Order, OrderItem, Product, Setting, User
+from models import Customer, ExtraPayment, Order, OrderItem, Product, Setting, User
 from schemas import (
     CustomerHistoryOut,
     CustomerOut,
     CustomerStats,
     CustomerWithBalance,
+    ExtraPaymentIn,
+    ExtraPaymentOut,
     FavoriteOut,
     MonthAgg,
     PinChangeIn,
+    ResetPaymentIn,
     WeekdayAgg,
 )
 from security import get_current_user, get_optional_user
@@ -312,7 +315,38 @@ def customer_lookup(
     )
 
 
-def settle_pending(db: Session, customer: Customer, actor: str, action: str) -> dict:
+def add_extra_payment(
+    db: Session, customer: Customer, actor: str, amount: float, note: str = ""
+) -> ExtraPayment:
+    """Book what a customer paid on top of their debt (no commit; the caller commits).
+
+    It is income of the store, not credit on the customer: their balance, totals and
+    statement stay what they were.
+    """
+    extra = ExtraPayment(
+        customer_id=customer.id,
+        username=customer.username,
+        amount=round(amount, 2),
+        note=note.strip(),
+        created_by=actor,
+    )
+    db.add(extra)
+    db.flush()
+    audit.record(
+        db, actor, "customer.extra_payment", "customer", customer.username,
+        f"extra payment of {extra.amount:.2f}" + (f": {extra.note}" if extra.note else ""),
+    )
+    return extra
+
+
+def settle_pending(
+    db: Session,
+    customer: Customer,
+    actor: str,
+    action: str,
+    extra_amount: float = 0.0,
+    extra_note: str = "",
+) -> dict:
     orders = (
         db.query(Order)
         .filter(Order.customer_id == customer.id, Order.status == "pending")
@@ -339,11 +373,15 @@ def settle_pending(db: Session, customer: Customer, actor: str, action: str) -> 
             + ", ".join(f"#{o.id}" for o in orders)
             + f"; amount {amount}",
         )
+    extra = round(extra_amount or 0.0, 2)
+    if extra > 0:
+        add_extra_payment(db, customer, actor, extra, extra_note)
     db.commit()
     return {
         "username": customer.username,
         "settled": len(orders),
         "amount": amount,
+        "extra": extra if extra > 0 else 0.0,
     }
 
 
@@ -409,9 +447,30 @@ def reset_pin(
 @router.post("/{username}/reset-payment")
 def reset_payment(
     username: str,
+    data: Optional[ResetPaymentIn] = Body(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Mark all pending orders paid. `extra_amount` is what the customer paid on top of
+    the debt; it is booked as an extra payment (store income that covers shrinkage)."""
+    data = data or ResetPaymentIn()
     return settle_pending(
-        db, find_customer(db, username), user.username, "customer.reset_payment"
+        db, find_customer(db, username), user.username, "customer.reset_payment",
+        extra_amount=data.extra_amount or 0.0, extra_note=data.note,
     )
+
+
+@router.post("/{username}/extra-payment", response_model=ExtraPaymentOut, status_code=201)
+def record_extra_payment(
+    username: str,
+    data: ExtraPaymentIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """A customer paid more than they owed (or paid in advance): book the surplus."""
+    extra = add_extra_payment(
+        db, find_customer(db, username), user.username, data.amount, data.note
+    )
+    db.commit()
+    db.refresh(extra)
+    return extra

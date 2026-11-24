@@ -48,12 +48,33 @@ Actions.register("admin-statement", (el) => Admin.openStatement(decodeURICompone
 Actions.register("admin-statement-month", (el) => Admin.changeStatementMonth(el.value));
 Actions.register("print-page", () => window.print());
 Actions.register("admin-report-basis", (el) => Admin.setReportBasis(el.dataset.basis));
+Actions.register("admin-add-purchase", () => Admin.openPurchaseModal());
+Actions.register("admin-edit-purchase", (el) => Admin.openPurchaseModal(parseInt(el.dataset.id)));
+Actions.register("admin-delete-purchase", (el) => Admin.confirmDeletePurchase(parseInt(el.dataset.id)));
+Actions.register("admin-add-extra", () => Admin.openExtraModal());
+Actions.register("admin-extra-for", (el) => Admin.openExtraModal(decodeURIComponent(el.dataset.username)));
+Actions.register("admin-delete-extra", (el) =>
+    Admin.confirmDeleteExtra(parseInt(el.dataset.id), decodeURIComponent(el.dataset.username), parseFloat(el.dataset.amount))
+);
+Actions.register("admin-pay-add", () => Admin.addPayMethod());
+Actions.register("admin-pay-remove", (el) => Admin.removePayMethod(parseInt(el.dataset.index)));
+Actions.register("admin-pay-field", (el) => Admin.setPayField(el));
+Actions.register("admin-pay-qr", (el) => Admin.uploadPayQr(el));
 
 Actions.register("kiosk-new-order", () => {
     Modal.close();
     Kiosk.newOrder();
 });
 Actions.register("kiosk-open-lookup", () => Kiosk.openLookup());
+Actions.register("kiosk-open-pay", (el) =>
+    el.dataset.username
+        ? Kiosk.openPay(decodeURIComponent(el.dataset.username), parseFloat(el.dataset.balance) || 0)
+        : Kiosk.openPay()
+);
+Actions.register("kiosk-pay-back", () => {
+    if (Kiosk.lastLookup) Kiosk.showLookup(Kiosk.lastLookup);
+    else Modal.close();
+});
 Actions.register("kiosk-lookup-suggest", (el) => Kiosk.suggestLookup(el));
 Actions.register("kiosk-lookup-pick", (el) => Kiosk.pickLookup(el.dataset.username));
 Actions.register("kiosk-mark-all-paid", (el) =>

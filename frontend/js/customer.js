@@ -7,8 +7,8 @@ const Kiosk = {
             if (qty) this.changeQty(parseInt(qty.dataset.id), parseInt(qty.dataset.delta));
             const cat = e.target.closest(".category-pill");
             if (cat) this.setCategory(parseInt(cat.dataset.id));
-            // #lookup-btn shares the .cart-btn style but must not open the cart.
-            const cartBtn = e.target.closest(".cart-btn:not(#lookup-btn)");
+            // #lookup-btn and #pay-btn share the .cart-btn style but must not open the cart.
+            const cartBtn = e.target.closest(".cart-btn:not(#lookup-btn):not(#pay-btn)");
             if (cartBtn) this.toggleCart();
             const lookupBtn = e.target.closest("#lookup-btn");
             if (lookupBtn) this.openLookup();
@@ -99,6 +99,7 @@ const Kiosk = {
     resetSession() {
         this.cancelIdleWarning();
         this.lookupPin = "";
+        this.lastLookup = null;
         Store.cart = [];
         Store.saveCart();
         Store.activeCategory = null;
@@ -121,6 +122,7 @@ const Kiosk = {
                     <button type="submit">Scan</button>
                 </form>` : ""}
                 <div style="display:flex; gap:0.75rem;">
+                    ${this.payMethods().length ? '<button class="cart-btn" id="pay-btn" data-action="kiosk-open-pay">💳 Pay</button>' : ""}
                     <button class="cart-btn" id="lookup-btn">🔍 User lookup</button>
                     <button class="cart-btn">🛒 Cart <span class="cart-badge" id="cart-count">${Store.cartCount()}</span></button>
                 </div>
@@ -462,8 +464,53 @@ const Kiosk = {
     // PIN that unlocked the lookup shown now; needed to refresh it after changes.
     lookupPin: "",
 
+    // The payment methods the admin chose to show (enabled ones only).
+    payMethods() {
+        return parsePayMethods(Store.settings.payment_methods).filter((m) => m.enabled !== false);
+    },
+
+    // "Pay": how to pay. Opened from the header (no username) or from a lookup, which
+    // adds the amount and asks for the username as the payment message.
+    openPay(username, balance) {
+        const methods = this.payMethods();
+        const instructions = (Store.settings.pay_instructions || "").trim();
+        const method = (m) => {
+            const [icon, typeName] = PAY_TYPES[m.type] || PAY_TYPES.text;
+            const value = (m.value || "").trim();
+            return `
+                <div class="pay-method">
+                    <div class="pay-method-head"><span aria-hidden="true">${icon}</span> ${esc(m.label || typeName)}</div>
+                    ${m.type === "qr" && m.image ? `<img class="pay-qr" src="${esc(payQrSrc(m.image))}" alt="QR code: ${esc(m.label || "pay")}">` : ""}
+                    ${value ? `<div class="pay-value${m.type === "text" ? " pay-text" : ""}">${esc(value)}</div>` : ""}
+                    ${m.note ? `<div class="pay-note">${esc(m.note)}</div>` : ""}
+                </div>`;
+        };
+        const content = `
+            <h2>💳 Pay</h2>
+            ${username ? `
+                <div class="balance-big">${fmt(balance)}</div>
+                <p style="text-align:center; color:var(--muted); margin:0 0 0.75rem;">to pay for <strong>${esc(username)}</strong></p>
+            ` : ""}
+            ${instructions ? `<p class="pay-instructions">${esc(instructions)}</p>` : ""}
+            ${username ? `<p class="pay-reference">Write <strong>${esc(username)}</strong> as the message, so the staff can see who paid.</p>` : ""}
+            ${methods.length === 0
+                ? '<p style="color:var(--muted);">No payment details are set up yet. Ask the staff.</p>'
+                : `<div class="pay-methods">${methods.map(method).join("")}</div>`}
+            <p style="color:var(--muted); font-size:0.9rem;">The staff mark your orders as paid when the payment has arrived.</p>
+            <div class="form-actions">
+                ${username && this.lastLookup ? '<button class="btn btn-secondary" data-action="kiosk-pay-back">Back</button>' : ""}
+                <button class="btn btn-primary" data-action="modal-close">Close</button>
+            </div>
+        `;
+        if (document.getElementById("modal-overlay")) Modal.fill(content);
+        else Modal.open(content);
+    },
+
+    lastLookup: null,
+
     openLookup() {
         this.lookupPin = "";
+        this.lastLookup = null;
         Modal.open(`
             <h2>Payment lookup</h2>
             <p style="color:var(--muted);">Start typing to see matching usernames.</p>
@@ -643,6 +690,7 @@ const Kiosk = {
     },
 
     showLookup(data) {
+        this.lastLookup = data;
         const orderBlock = (o) => `
             <div class="history-order">
                 <div class="history-order-head">
@@ -704,6 +752,11 @@ const Kiosk = {
                         data-has-pin="${data.customer.has_pin ? "true" : "false"}">
                     ${data.customer.has_pin ? "🔒 Change PIN" : "🔒 Set a PIN"}
                 </button>
+                ${data.balance > 0 && this.payMethods().length ? `
+                    <button class="btn btn-primary" data-action="kiosk-open-pay"
+                            data-username="${esc(encodeURIComponent(data.customer.username))}"
+                            data-balance="${data.balance}">💳 Pay</button>
+                ` : ""}
                 <button class="btn btn-secondary" data-action="modal-close">Close</button>
                 <button class="btn btn-primary" data-action="kiosk-open-lookup">Another user</button>
             </div>

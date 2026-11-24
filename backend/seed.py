@@ -49,6 +49,8 @@ def seed(db: Session):
         "payment_due_date": "",
         "kiosk_idle_seconds": "90",
         "kiosk_barcode_scanning": "false",
+        "payment_methods": "[]",
+        "pay_instructions": "",
         "backup_interval_hours": "24",
         "backup_keep": "7",
     }.items():
