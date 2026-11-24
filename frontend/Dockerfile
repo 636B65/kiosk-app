@@ -1,6 +1,6 @@
-# nginx 1.31.9 (mainline): fixes CVE-2026-123007/-123633/-121810 (HTTP/2, HTTP/3),
-# CVE-2026-125283 (try_files + alias) and more; see the 1.5.2 CHANGELOG entry.
-FROM nginx:alpine@sha256:fb4658584bd9a916ffb6f6e365f97c25cfdb2923801f551ea08356e695f14ff7
+# nginx 1.31.10 (mainline). 1.31.9 fixed CVE-2026-123007/-123633/-121810 (HTTP/2,
+# HTTP/3), CVE-2026-125283 (try_files + alias) and more; 1.31.10 CVE-2026-132779.
+FROM nginx:alpine@sha256:b50897d5c7b1aa08067c3d90c5e8b3e47ec4e3c91c91446f67820228f7b41e34
 
 # Pick up Alpine security fixes released after the base image was built;
 # openssl is needed to generate the self-signed TLS certificate on first start.
