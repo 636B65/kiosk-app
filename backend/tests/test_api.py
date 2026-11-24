@@ -2132,3 +2132,314 @@ def test_sales_basis_counts_unpaid_credit_orders(client, admin_headers):
     assert summary_rows and all("incl. unpaid" in x["details"] for x in summary_rows)
     assert client.get("/api/reports/summary?basis=cash", headers=admin_headers).status_code == 422
 
+
+
+# --------------------------------------------------------------------------- #
+# Purchases, extra payments, the store balance and the payment info (1.6.0)
+# --------------------------------------------------------------------------- #
+def _balance(client, headers):
+    r = client.get("/api/reports/balance", headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_purchases_are_entered_edited_and_deleted(client, admin_headers):
+    from timeutil import utcnow
+
+    today = utcnow().date()
+    before = _balance(client, admin_headers)["purchases_total"]
+
+    r = client.post("/api/purchases", json={"amount": 120.5, "supplier": "Wholesaler", "note": "chips"}, headers=admin_headers)
+    assert r.status_code == 201, r.text
+    first = r.json()
+    assert first["purchased_on"] == today.isoformat() and first["created_by"] == "admin"
+
+    # A batch bought earlier is entered afterwards with its real date.
+    old_day = (today - timedelta(days=40)).isoformat()
+    old = client.post("/api/purchases", json={"amount": 80, "purchased_on": old_day}, headers=admin_headers).json()
+    assert old["purchased_on"] == old_day
+    assert _balance(client, admin_headers)["purchases_total"] == pytest.approx(before + 200.5)
+    listed = [p["id"] for p in client.get("/api/purchases", headers=admin_headers).json()]
+    assert listed.index(first["id"]) < listed.index(old["id"]), "newest purchase date first"
+
+    # The value of an earlier batch can be corrected later.
+    r = client.put(f"/api/purchases/{old['id']}", json={"amount": 95.25, "note": "invoice found"}, headers=admin_headers)
+    assert r.status_code == 200 and r.json()["amount"] == 95.25 and r.json()["note"] == "invoice found"
+    assert _balance(client, admin_headers)["purchases_total"] == pytest.approx(before + 215.75)
+
+    assert client.delete(f"/api/purchases/{first['id']}", headers=admin_headers).status_code == 204
+    assert client.delete(f"/api/purchases/{old['id']}", headers=admin_headers).status_code == 204
+    assert client.delete(f"/api/purchases/{old['id']}", headers=admin_headers).status_code == 404
+    assert _balance(client, admin_headers)["purchases_total"] == pytest.approx(before)
+
+    actions = {e["action"] for e in client.get("/api/audit?action=purchase.", headers=admin_headers).json()}
+    assert {"purchase.create", "purchase.update", "purchase.delete"} <= actions
+
+
+def test_purchase_validation(client, admin_headers):
+    from timeutil import utcnow
+
+    for bad in ({"amount": 0}, {"amount": -5}, {"amount": 1e12}, {"amount": "abc"}, {}):
+        assert client.post("/api/purchases", json=bad, headers=admin_headers).status_code == 422, bad
+    future = (utcnow().date() + timedelta(days=5)).isoformat()
+    assert client.post("/api/purchases", json={"amount": 5, "purchased_on": future}, headers=admin_headers).status_code == 422
+    assert client.put("/api/purchases/999999", json={"amount": 5}, headers=admin_headers).status_code == 404
+    p = client.post("/api/purchases", json={"amount": 5}, headers=admin_headers).json()
+    assert client.put(f"/api/purchases/{p['id']}", json={"purchased_on": future}, headers=admin_headers).status_code == 422
+    assert client.put(f"/api/purchases/{p['id']}", json={"amount": 0}, headers=admin_headers).status_code == 422
+    client.delete(f"/api/purchases/{p['id']}", headers=admin_headers)
+    assert client.get("/api/purchases").status_code == 401
+    assert client.post("/api/purchases", json={"amount": 5}).status_code == 401
+
+
+def test_balance_status_rounds_to_the_cent():
+    from routers.reports import balance_status
+
+    assert [balance_status(x) for x in (0, 0.004, -0.004, 0.01, -0.01, 120.0, -3.5)] == [
+        "even", "even", "even", "plus", "minus", "plus", "minus",
+    ]
+
+
+def test_store_balance_is_paid_plus_extra_minus_purchases(client, admin_headers):
+    start = _balance(client, admin_headers)
+    product = _new_product(client, admin_headers, price=10.0, stock=30, cost_price=4.0)
+    buyer = f"balance_{uuid.uuid4().hex[:6]}"
+    order = _buy(client, buyer, product["id"], 3)  # 30.00 on credit
+    after_sale = _balance(client, admin_headers)
+
+    # Credit is not income until it is paid, but it shows as outstanding / projected.
+    assert after_sale["balance"] == pytest.approx(start["balance"])
+    assert after_sale["outstanding"] == pytest.approx(start["outstanding"] + 30)
+    assert after_sale["projected_balance"] == pytest.approx(start["projected_balance"] + 30)
+    assert after_sale["pending_orders"] == start["pending_orders"] + 1
+    assert after_sale["settled"] is False
+
+    purchase = client.post("/api/purchases", json={"amount": 100}, headers=admin_headers).json()
+    after_purchase = _balance(client, admin_headers)
+    assert after_purchase["balance"] == pytest.approx(start["balance"] - 100)
+    assert after_purchase["projected_balance"] == pytest.approx(start["projected_balance"] + 30 - 100)
+
+    # Marked paid -> it lands in the balance; the surplus is extra income.
+    r = client.post(
+        f"/api/customers/{buyer}/reset-payment",
+        json={"extra_amount": 7.5, "note": "keep the change"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert (r.json()["settled"], r.json()["amount"], r.json()["extra"]) == (1, 30.0, 7.5)
+    paid = _balance(client, admin_headers)
+    assert paid["paid_total"] == pytest.approx(start["paid_total"] + 30)
+    assert paid["extra_total"] == pytest.approx(start["extra_total"] + 7.5)
+    assert paid["balance"] == pytest.approx(start["balance"] - 100 + 30 + 7.5)
+    assert paid["outstanding"] == pytest.approx(start["outstanding"])
+    assert paid["income_total"] == pytest.approx(paid["paid_total"] + paid["extra_total"])
+    assert paid["projected_balance"] == pytest.approx(paid["balance"] + paid["outstanding"])
+    assert paid["status"] in {"plus", "minus", "even"}
+
+    # The extra payment is store income, never credit on the customer.
+    lookup = client.get(f"/api/customers/{buyer}").json()
+    assert lookup["balance"] == pytest.approx(0)
+    assert lookup["total_paid"] == pytest.approx(30)
+    assert lookup["stats"]["total_paid"] == pytest.approx(30)
+
+    # Derived, not stored: paid -> pending takes it out of the balance again.
+    client.patch(f"/api/orders/{order['id']}/status?new_status=pending", headers=admin_headers)
+    back = _balance(client, admin_headers)
+    assert back["paid_total"] == pytest.approx(start["paid_total"])
+    assert back["balance"] == pytest.approx(start["balance"] - 100 + 7.5)
+    # A cancelled order is no income and no debt.
+    client.patch(f"/api/orders/{order['id']}/status?new_status=cancelled", headers=admin_headers)
+    cancelled = _balance(client, admin_headers)
+    assert cancelled["outstanding"] == pytest.approx(start["outstanding"])
+    assert cancelled["balance"] == pytest.approx(start["balance"] - 100 + 7.5)
+
+    # An earlier purchase can still be corrected: the balance follows.
+    client.put(f"/api/purchases/{purchase['id']}", json={"amount": 60}, headers=admin_headers)
+    assert _balance(client, admin_headers)["balance"] == pytest.approx(start["balance"] - 60 + 7.5)
+    client.delete(f"/api/purchases/{purchase['id']}", headers=admin_headers)
+
+
+def test_balance_reads_plus_minus_or_even_once_everything_is_paid(client, admin_headers):
+    """With nothing outstanding, `status` is the final result of the store."""
+    # Everybody pays: nothing is on credit any more.
+    for c in client.get("/api/customers", headers=admin_headers).json():
+        if c["balance"] > 0:
+            client.post(f"/api/customers/{c['username']}/reset-payment", headers=admin_headers)
+    settled = _balance(client, admin_headers)
+    assert settled["settled"] is True and settled["pending_orders"] == 0 and settled["outstanding"] == 0
+    assert settled["projected_balance"] == pytest.approx(settled["balance"])
+    assert settled["projected_status"] == settled["status"]
+
+    # Make sure there is money to spend, then spend exactly that: even.
+    name = f"even_{uuid.uuid4().hex[:6]}"
+    _buy(client, name, _new_product(client, admin_headers, price=1.0, stock=2)["id"], 1)
+    extra = round(max(0.0, -settled["balance"]) + 100, 2)
+    r = client.post(f"/api/customers/{name}/extra-payment", json={"amount": extra, "note": "top-up"}, headers=admin_headers)
+    assert r.status_code == 201, r.text
+    client.post(f"/api/customers/{name}/reset-payment", headers=admin_headers)
+    money = _balance(client, admin_headers)["balance"]
+    assert money > 0
+
+    purchase = client.post("/api/purchases", json={"amount": money}, headers=admin_headers).json()
+    even = _balance(client, admin_headers)
+    assert (even["status"], even["balance"], even["settled"]) == ("even", 0, True)
+
+    client.put(f"/api/purchases/{purchase['id']}", json={"amount": round(money + 5, 2)}, headers=admin_headers)
+    minus = _balance(client, admin_headers)
+    assert (minus["status"], minus["balance"]) == ("minus", -5)
+    client.put(f"/api/purchases/{purchase['id']}", json={"amount": round(money - 5, 2)}, headers=admin_headers)
+    plus = _balance(client, admin_headers)
+    assert (plus["status"], plus["balance"]) == ("plus", 5)
+    client.delete(f"/api/purchases/{purchase['id']}", headers=admin_headers)
+
+
+def test_extra_payments_are_listed_validated_and_removable(client, admin_headers):
+    name = f"extra_{uuid.uuid4().hex[:6]}"
+    order = _buy(client, name, _new_product(client, admin_headers, price=3.0, stock=5)["id"], 1)
+    assert client.post(f"/api/customers/{name}/extra-payment", json={"amount": 0}, headers=admin_headers).status_code == 422
+    assert client.post(f"/api/customers/{name}/extra-payment", json={"amount": -2}, headers=admin_headers).status_code == 422
+    assert client.post("/api/customers/nobody_here_x/extra-payment", json={"amount": 2}, headers=admin_headers).status_code == 404
+    assert client.post(f"/api/customers/{name}/extra-payment", json={"amount": 2}).status_code == 401
+    assert client.post(f"/api/customers/{name}/reset-payment", json={"extra_amount": -1}, headers=admin_headers).status_code == 422
+
+    # reset-payment without a body (existing clients) and without an extra amount book no extra.
+    r = client.post(f"/api/customers/{name}/reset-payment", headers=admin_headers)
+    assert (r.json()["settled"], r.json()["extra"]) == (1, 0.0)
+    assert order["total"] == 3.0
+    extra_before = _balance(client, admin_headers)["extra_total"]
+
+    # Paying more than owed with nothing owed is fine: it is booked as income all the same.
+    r = client.post(f"/api/customers/{name}/extra-payment", json={"amount": 4.25, "note": "tip jar"}, headers=admin_headers)
+    assert r.status_code == 201 and r.json()["username"] == name and r.json()["amount"] == 4.25
+    entry = r.json()
+    assert _balance(client, admin_headers)["extra_total"] == pytest.approx(extra_before + 4.25)
+    listed = client.get("/api/extra-payments", headers=admin_headers).json()
+    assert listed[0]["id"] == entry["id"] and listed[0]["note"] == "tip jar" and listed[0]["created_by"] == "admin"
+    assert client.get("/api/extra-payments").status_code == 401
+
+    # The customer's own figures never change.
+    assert client.get(f"/api/customers/{name}").json()["balance"] == 0
+
+    assert client.delete(f"/api/extra-payments/{entry['id']}", headers=admin_headers).status_code == 204
+    assert client.delete(f"/api/extra-payments/{entry['id']}", headers=admin_headers).status_code == 404
+    assert _balance(client, admin_headers)["extra_total"] == pytest.approx(extra_before)
+    actions = {e["action"] for e in client.get("/api/audit?action=customer.extra", headers=admin_headers).json()}
+    assert {"customer.extra_payment", "customer.extra_payment_delete"} <= actions
+
+
+def test_extra_payments_cover_shrinkage(client, admin_headers):
+    """Missing goods are already a lower balance; the extra income is shown against that loss."""
+    start = _balance(client, admin_headers)
+    pid = _new_product(client, admin_headers, stock=20, cost_price=3.0)["id"]
+    _count(client, admin_headers, {"product_id": pid, "counted": 16, "expected_stock": 20})  # 4 missing = 12.00
+    lost = _balance(client, admin_headers)
+    assert lost["shrinkage_value"] == pytest.approx(start["shrinkage_value"] + 12.0)
+    # Shrinkage is not subtracted from the balance a second time.
+    assert lost["balance"] == pytest.approx(start["balance"])
+    assert lost["shrinkage_covered"] == pytest.approx(min(lost["extra_total"], lost["shrinkage_value"]))
+    assert lost["shrinkage_covered"] + lost["shrinkage_uncovered"] == pytest.approx(lost["shrinkage_value"])
+    assert lost["extra_surplus"] == pytest.approx(max(0.0, lost["extra_total"] - lost["shrinkage_value"]))
+
+
+def test_balance_in_summary_and_csv_export(client, admin_headers):
+    summary = client.get("/api/reports/summary", headers=admin_headers).json()
+    assert summary["store_balance"] == _balance(client, admin_headers)
+    purchase = client.post("/api/purchases", json={"amount": 12.5, "supplier": "=SUM(A1)"}, headers=admin_headers).json()
+    rows = list(csv.DictReader(io.StringIO(
+        client.get("/api/reports/export.csv", headers=admin_headers).text.lstrip("﻿"))))
+    records = {r["record"]: r for r in rows if r["section"] == "store_balance"}
+    assert {"purchases", "paid_orders", "extra_payments", "balance", "outstanding", "projected_balance", "shrinkage_value"} <= set(records)
+    exported = next(r for r in rows if r["section"] == "purchases" and r["id"] == str(purchase["id"]))
+    assert exported["amount"] == "12.5" and exported["name"] == "'=SUM(A1)", "formulas are neutralised"
+    client.delete(f"/api/purchases/{purchase['id']}", headers=admin_headers)
+
+
+def _methods(*items):
+    import json
+
+    return json.dumps(list(items))
+
+
+def test_payment_methods_are_validated_and_stored_canonically(client, admin_headers):
+    import json
+
+    ok = _methods(
+        {"type": "bank", "label": "Bank transfer", "value": "SE12 3456 7890", "note": "Message: your username"},
+        {"type": "phone", "label": "Swish", "value": "070-123 45 67"},
+        {"type": "link", "label": "Pay online", "value": "https://pay.example.com/kiosk", "enabled": False},
+        {"type": "text", "label": "Cash", "value": "Put it in the tin\nat the counter"},
+    )
+    r = client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": ok}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    stored = json.loads(client.get("/api/settings").json()["payment_methods"])
+    assert [m["type"] for m in stored] == ["bank", "phone", "link", "text"]
+    assert [m["enabled"] for m in stored] == [True, True, False, True]
+    assert set(stored[0]) == {"type", "label", "value", "note", "image", "enabled"}
+
+    bad = [
+        "not json", '{"type": "bank"}', _methods("string"), _methods({"type": "crypto", "value": "x"}),
+        _methods({"type": "bank", "label": "B"}),  # no value
+        _methods({"type": "link", "label": "L", "value": "javascript:alert(1)"}),
+        _methods({"type": "link", "label": "L", "value": "ftp://x.example"}),
+        _methods({"type": "bank", "value": "x" * 301}),
+        _methods({"type": "bank", "value": "ok", "enabled": "yes"}),
+        _methods({"type": "bank", "value": "a\u0000b"}),
+        _methods({"type": "qr", "label": "QR"}),  # no image uploaded
+        _methods({"type": "qr", "image": "../../etc/passwd"}),
+        _methods({"type": "qr", "image": "pay-" + "0" * 32 + ".png"}),  # looks right, was never uploaded
+        _methods({"type": "qr", "image": "some-product-image.png"}),
+        json.dumps([{"type": "text", "value": "x"}] * 11),
+    ]
+    for value in bad:
+        r = client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": value}, headers=admin_headers)
+        assert r.status_code == 422, value[:60]
+    # A rejected save leaves the stored setting alone.
+    assert len(json.loads(client.get("/api/settings").json()["payment_methods"])) == 4
+
+    r = client.put("/api/settings/pay_instructions", json={"key": "pay_instructions", "value": "Pay within 14 days"}, headers=admin_headers)
+    assert r.status_code == 200 and client.get("/api/settings").json()["pay_instructions"] == "Pay within 14 days"
+    assert client.put("/api/settings/pay_instructions", json={"key": "pay_instructions", "value": "x" * 501}, headers=admin_headers).status_code == 422
+    assert client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": ok}).status_code == 401
+
+    audit = client.get("/api/audit?action=settings.update", headers=admin_headers).json()
+    assert any(e["entity_id"] == "payment_methods" and "4 payment method(s), 3 shown" in e["details"] for e in audit)
+    client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": "[]"}, headers=admin_headers)
+    client.put("/api/settings/pay_instructions", json={"key": "pay_instructions", "value": ""}, headers=admin_headers)
+
+
+def test_payment_qr_upload_is_served_and_cleaned_up(client, admin_headers):
+    import json
+    import re
+
+    png = _sample_png()
+    r = client.post("/api/settings/payment-qr", files={"file": ("qr.png", png, "image/png")}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    name = r.json()["image"]
+    assert re.fullmatch(r"pay-[0-9a-f]{32}\.png", name) and r.json()["url"] == f"/api/images/{name}"
+    assert client.get(r.json()["url"]).status_code == 200  # the kiosk can show it without logging in
+
+    methods = _methods({"type": "qr", "label": "Swish QR", "value": "070-123 45 67", "image": name})
+    assert client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": methods}, headers=admin_headers).status_code == 200
+    assert json.loads(client.get("/api/settings").json()["payment_methods"])[0]["image"] == name
+
+    # Replacing the QR code removes the old file; so does dropping the method.
+    second = client.post("/api/settings/payment-qr", files={"file": ("qr2.png", png, "image/png")}, headers=admin_headers).json()["image"]
+    assert second != name
+    methods2 = _methods({"type": "qr", "label": "Swish QR", "image": second})
+    client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": methods2}, headers=admin_headers)
+    assert client.get(f"/api/images/{name}").status_code == 404
+    assert client.get(f"/api/images/{second}").status_code == 200
+    client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": "[]"}, headers=admin_headers)
+    assert client.get(f"/api/images/{second}").status_code == 404
+
+    for bad_file in (
+        ("qr.png", b"", "image/png"),
+        ("qr.png", b"not an image at all", "image/png"),
+        ("qr.svg", b"<svg onload=alert(1)/>", "image/svg+xml"),
+        ("qr.png", png, "image/jpeg"),
+    ):
+        r = client.post("/api/settings/payment-qr", files={"file": bad_file}, headers=admin_headers)
+        assert r.status_code == 400, bad_file[0]
+    too_big = png + b"\0" * (5 * 1024 * 1024)
+    assert client.post("/api/settings/payment-qr", files={"file": ("big.png", too_big, "image/png")}, headers=admin_headers).status_code == 413
+    assert client.post("/api/settings/payment-qr", files={"file": ("qr.png", png, "image/png")}).status_code == 401
