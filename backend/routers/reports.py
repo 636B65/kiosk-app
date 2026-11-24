@@ -12,7 +12,7 @@ from starlette.responses import Response
 
 from database import get_db
 from due_dates import get_due_date
-from models import Customer, Order, OrderItem, Product, StockAdjustment
+from models import Customer, ExtraPayment, Order, OrderItem, Product, Purchase, StockAdjustment
 from security import get_current_user
 from timeutil import utcnow
 
@@ -65,6 +65,66 @@ def outstanding_total(db: Session) -> float:
         .scalar()
     )
     return round(total or 0.0, 2)
+
+
+def balance_status(amount: float) -> str:
+    """"plus", "minus" or "even" (to the cent) for a store balance."""
+    cents = round(amount, 2)
+    if cents == 0:
+        return "even"
+    return "plus" if cents > 0 else "minus"
+
+
+def shrinkage_value_lost(db: Session) -> float:
+    """Value (at the purchase price recorded with each count) of everything counts found missing."""
+    total = 0.0
+    for adj in db.query(StockAdjustment).filter(StockAdjustment.difference < 0).all():
+        total += -adj.difference * (adj.unit_cost or 0)
+    return round(total, 2)
+
+
+def store_balance(db: Session) -> dict:
+    """What the store has taken in and spent, whatever the sales report basis.
+
+    Always computed from the rows (never kept as a running total), so it stays right when
+    an order goes paid -> pending, is cancelled, or a purchase is edited later:
+
+        balance = paid orders + extra payments - purchases
+
+    Orders still on credit are not in the balance yet; `projected_balance` adds them, which is
+    where the store ends up when everybody has paid. Missing goods are NOT subtracted: they
+    were bought and never sold, so they already show as a lower balance. Extra payments
+    are the money that covers that loss, so the shrinkage figures are information next to it.
+    """
+    paid = db.query(func.coalesce(func.sum(Order.total), 0.0)).filter(Order.status == "paid").scalar()
+    extra = db.query(func.coalesce(func.sum(ExtraPayment.amount), 0.0)).scalar()
+    spent = db.query(func.coalesce(func.sum(Purchase.amount), 0.0)).scalar()
+    pending_orders = db.query(Order).filter(Order.status == "pending").count()
+    outstanding = outstanding_total(db)
+    paid, extra, spent = round(paid or 0.0, 2), round(extra or 0.0, 2), round(spent or 0.0, 2)
+    balance = round(paid + extra - spent, 2)
+    projected = round(balance + outstanding, 2)
+    shrinkage = shrinkage_value_lost(db)
+    return {
+        "purchases_total": spent,
+        "purchases_count": db.query(Purchase).count(),
+        "paid_total": paid,
+        "extra_total": extra,
+        "extra_count": db.query(ExtraPayment).count(),
+        "income_total": round(paid + extra, 2),
+        "balance": balance,
+        "status": balance_status(balance),
+        "outstanding": outstanding,
+        "pending_orders": pending_orders,
+        # True when nobody owes anything: then `status` is the final result.
+        "settled": pending_orders == 0,
+        "projected_balance": projected,
+        "projected_status": balance_status(projected),
+        "shrinkage_value": shrinkage,
+        "shrinkage_covered": round(min(extra, shrinkage), 2),
+        "shrinkage_uncovered": round(max(0.0, shrinkage - extra), 2),
+        "extra_surplus": round(max(0.0, extra - shrinkage), 2),
+    }
 
 
 def low_stock_products(db: Session) -> list[dict]:
@@ -346,7 +406,17 @@ def summary(
         "next_due_date": get_due_date(db),
         "low_stock_products": low_stock_products(db),
         "margin_month": margins_for_period(db, month, next_month, basis)["totals"],
+        "store_balance": store_balance(db),
     }
+
+
+@router.get("/balance")
+def balance(
+    _: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Store balance: paid orders + extra payments - purchases (see store_balance)."""
+    return store_balance(db)
 
 
 @router.get("/margins")
@@ -524,6 +594,24 @@ def export_csv(
         record="store",
         details=get_due_date(db) or "not configured",
     )
+    bal = store_balance(db)
+    write_row("store_balance", record="purchases", count=bal["purchases_count"],
+              amount=bal["purchases_total"], details="money spent on goods")
+    write_row("store_balance", record="paid_orders", amount=bal["paid_total"],
+              details="orders marked paid")
+    write_row("store_balance", record="extra_payments", count=bal["extra_count"],
+              amount=bal["extra_total"], details="paid on top of debts; covers shrinkage")
+    write_row("store_balance", record="balance", amount=bal["balance"], details=bal["status"])
+    write_row("store_balance", record="outstanding", count=bal["pending_orders"],
+              amount=bal["outstanding"], details="credit not yet paid")
+    write_row("store_balance", record="projected_balance", amount=bal["projected_balance"],
+              details=f"if everybody pays: {bal['projected_status']}")
+    write_row("store_balance", record="shrinkage_value", amount=bal["shrinkage_value"],
+              details=f"covered by extra payments: {bal['shrinkage_covered']}")
+    for purchase in db.query(Purchase).order_by(Purchase.purchased_on, Purchase.id).all():
+        write_row("purchases", period=purchase.purchased_on.isoformat(), record="purchase",
+                  record_id=purchase.id, name=purchase.supplier, amount=purchase.amount,
+                  details=purchase.note)
     paid_by_customer = {
         row.customer_id: (
             row.order_count,

@@ -210,6 +210,42 @@ class StockAdjustment(Base):
     created_at = Column(DateTime, default=utcnow, index=True)
 
 
+class Purchase(Base):
+    """Money the store spent on goods (one row per buying trip or invoice).
+
+    `purchased_on` may be any past date, so a batch bought earlier can be entered
+    afterwards; it is the shop's cost side of the store balance (see reports.py).
+    """
+
+    __tablename__ = "purchases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchased_on = Column(Date, nullable=False, default=lambda: utcnow().date(), index=True)
+    amount = Column(Float, nullable=False)
+    supplier = Column(String, default="")
+    note = Column(String, default="")
+    created_by = Column(String, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+
+class ExtraPayment(Base):
+    """What a customer paid on top of their debt.
+
+    Store income (it is not credit on the customer's balance); it counts toward
+    covering shrinkage. `username` is kept so the entry stays readable.
+    """
+
+    __tablename__ = "extra_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
+    username = Column(String, nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    note = Column(String, default="")
+    created_by = Column(String, default="")
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
