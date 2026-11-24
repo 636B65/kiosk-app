@@ -6,6 +6,46 @@ From 1.1.0 on, versions follow [Semantic Versioning](https://semver.org/): **MAJ
 changes that break existing installations or API clients, **MINOR** for new features that
 stay backwards compatible, **PATCH** for bug and security fixes only.
 
+## [1.6.0] - 2026-11-24
+
+### Added
+- **Money** (admin **Money**). Enter what you bought in (**Purchases**: amount, date, supplier,
+  note). The date may be any earlier day, so a batch that was already bought and stocked is entered
+  afterwards, and a purchase can be edited or deleted later. As customers buy on credit and
+  you mark their orders as paid, the money lands in the **store balance**: *paid orders + extra
+  payments - purchases*. While orders are still unpaid it also shows where you end if everyone
+  pays; once everyone has paid it reads plus, minus or even. The balance is always computed
+  from the data, so it stays right if an order goes back to unpaid or is cancelled, or a purchase
+  is corrected. The dashboard has a Store balance card; API: `GET /api/reports/balance`,
+  `/api/purchases`, `summary.store_balance`; the CSV export has `store_balance` and `purchases`
+  sections.
+- **Extra payments.** When a customer pays their debt plus a bit more, Reset payment has an
+  optional *Extra amount* (and a customer can get an extra payment from the Customers and
+  Money pages). It counts as store income that covers shrinkage; it is **not** credit on the
+  customer, whose balance, totals and statement stay as they were. The Money page compares the
+  extra payments with the shrinkage found by counts. API: `POST /api/customers/{u}/extra-payment`,
+  `reset-payment` takes `{"extra_amount", "note"}` (no body still works), `/api/extra-payments`.
+  Audited as `customer.extra_payment`.
+- **Pay.** A *Pay* button on the kiosk (and in the user lookup, with the amount and the username
+  as the message to write) tells customers how to pay. The admin chooses what is shown in
+  Settings: bank account, phone number (e.g. Swish), QR code (uploaded image), link or free text,
+  each with a name, a note and a *Show on kiosk* switch, plus an instruction above them. The button
+  appears once at least one method is shown. Payment info is validated on save (settings
+  `payment_methods`, `pay_instructions`; QR upload `POST /api/settings/payment-qr`) and rendered
+  as text, with no external services, so it works offline.
+
+### Changed
+- Reset payment from a customer's history now asks for confirmation like the table button does.
+- The demo (GitHub Pages) mirrors everything above and ships with example purchases, an extra
+  payment and payment methods.
+
+### Tests
+- Backend: 98 tests (new: purchases with past dates and validation, the balance as paid + extra -
+  purchases, credit vs paid, plus/minus/even once everyone has paid, extra payments are no
+  customer credit, shrinkage coverage, CSV/summary, payment method validation, QR upload and
+  cleanup). E2E: 61 steps (new: purchases and the balance, an extra amount in Reset payment, the
+  settled summary, the Pay button, Pay from the lookup, a QR code upload).
+
 ## [1.5.4] - 2026-11-24
 
 ### Security

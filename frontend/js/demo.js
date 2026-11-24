@@ -59,12 +59,19 @@
             kiosk_barcode_scanning: "false",
             backup_interval_hours: "24",
             backup_keep: "7",
+            pay_instructions: "Pay within two weeks, then tell the staff.",
+            payment_methods: JSON.stringify([
+                { type: "phone", label: "Swish", value: "070-123 45 67", note: "Write your username as the message", image: "", enabled: true },
+                { type: "bank", label: "Bank transfer", value: "SE12 3456 7890 1234 5678 9012", note: "", image: "", enabled: true },
+            ]),
         },
+        purchases: [],
+        extras: [],
         restocks: [],
         adjustments: [],
         audit: [],
         tokens: {},
-        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100, restock: 1, adjustment: 1, audit: 1 },
+        nextId: { product: 100, customer: 100, order: 100, item: 100, user: 100, restock: 1, adjustment: 1, audit: 1, purchase: 1, extra: 1 },
     };
 
     const CAT_ID = (name) => DB.categories.find((c) => c.name === name).id;
@@ -151,6 +158,14 @@
         items: [{ product_id: 11, product_name: "Baseball Cap", quantity: 1, unit_price: 12.99 }],
     });
 
+    DB.purchases.push(
+        { id: DB.nextId.purchase++, purchased_on: fmtDT(daysAgo(40)).slice(0, 10), amount: 120, supplier: "Wholesaler", note: "snacks and drinks", created_by: "admin", created_at: fmtDT(daysAgo(40)) },
+        { id: DB.nextId.purchase++, purchased_on: fmtDT(daysAgo(12)).slice(0, 10), amount: 45.5, supplier: "Corner shop", note: "restock", created_by: "admin", created_at: fmtDT(daysAgo(12)) },
+    );
+    DB.extras.push(
+        { id: DB.nextId.extra++, customer_id: 3, username: "carol", amount: 2.01, note: "keep the change", created_by: "admin", created_at: fmtDT(daysAgo(12, 14)) },
+    );
+
     function today() { return fmtDT(new Date()).slice(0, 10); }
 
     function specialActive(p) {
@@ -165,6 +180,54 @@
     }
 
     function round2(n) { return Math.round(n * 100) / 100; }
+
+    function extraOut(x) {
+        return { id: x.id, username: x.username, amount: x.amount, note: x.note, created_by: x.created_by, created_at: x.created_at };
+    }
+
+    // An overpayment is store income, never credit on the customer (backend add_extra_payment).
+    function addExtra(customer, amount, note, actor) {
+        const extra = {
+            id: DB.nextId.extra++, customer_id: customer.id, username: customer.username,
+            amount: round2(amount), note: (note || "").trim(), created_by: actor, created_at: fmtDT(new Date()),
+        };
+        DB.extras.push(extra);
+        audit(actor, "customer.extra_payment", "customer", customer.username,
+            `extra payment of ${extra.amount.toFixed(2)}` + (extra.note ? `: ${extra.note}` : ""));
+        return extraOut(extra);
+    }
+
+    function checkPurchaseDate(day) {
+        const limit = fmtDT(new Date(Date.now() + 86400000)).slice(0, 10);
+        if (day && day > limit) throw new ApiError(HTTP.UNPROCESSABLE, "The purchase date cannot be in the future");
+    }
+
+    // Mirrors backend/payment_info.py::normalize_methods (the demo keeps QR images as data URLs).
+    function normalizePayMethods(raw) {
+        let data;
+        try { data = JSON.parse(raw || "[]"); } catch { throw new ApiError(HTTP.UNPROCESSABLE, "payment_methods must be valid JSON"); }
+        if (!Array.isArray(data)) throw new ApiError(HTTP.UNPROCESSABLE, "payment_methods must be a list");
+        if (data.length > 10) throw new ApiError(HTTP.UNPROCESSABLE, "At most 10 payment methods are allowed");
+        const types = ["bank", "phone", "qr", "link", "text"];
+        return JSON.stringify(data.map((m, i) => {
+            const n = i + 1;
+            if (!m || !types.includes(m.type)) throw new ApiError(HTTP.UNPROCESSABLE, `Payment method ${n}: type must be one of ${types.join(", ")}`);
+            const value = String(m.value || "").trim();
+            if (m.type === "qr") {
+                if (!m.image) throw new ApiError(HTTP.UNPROCESSABLE, `Payment method ${n}: upload a QR code image first`);
+            } else if (!value) {
+                throw new ApiError(HTTP.UNPROCESSABLE, `Payment method ${n}: a value is required`);
+            }
+            if (m.type === "link" && !/^https?:\/\/\S+$/i.test(value)) {
+                throw new ApiError(HTTP.UNPROCESSABLE, `Payment method ${n}: a link must start with http:// or https://`);
+            }
+            return {
+                type: m.type, label: String(m.label || "").trim().slice(0, 40), value: value.slice(0, 300),
+                note: String(m.note || "").trim().slice(0, 300), image: m.type === "qr" ? String(m.image) : "",
+                enabled: m.enabled !== false,
+            };
+        }));
+    }
 
     function audit(actor, action, entity, entityId, details) {
         DB.audit.push({
@@ -526,6 +589,37 @@
         return { order_count: count, revenue: Math.round(sum * 100) / 100 };
     }
 
+    function balanceStatus(n) {
+        const cents = round2(n);
+        return cents === 0 ? "even" : cents > 0 ? "plus" : "minus";
+    }
+
+    // Mirrors backend/routers/reports.py::store_balance.
+    function storeBalance() {
+        const sum = (rows, key) => round2(rows.reduce((total, row) => total + row[key], 0));
+        const pending = DB.orders.filter((o) => o.status === "pending");
+        const paid = sum(DB.orders.filter((o) => o.status === "paid"), "total");
+        const extra = sum(DB.extras, "amount");
+        const spent = sum(DB.purchases, "amount");
+        const outstanding = sum(pending, "total");
+        const balance = round2(paid + extra - spent);
+        const projected = round2(balance + outstanding);
+        const shrinkage = round2(DB.adjustments.filter((a) => a.difference < 0)
+            .reduce((total, a) => total + -a.difference * (a.unit_cost || 0), 0));
+        return {
+            purchases_total: spent, purchases_count: DB.purchases.length,
+            paid_total: paid, extra_total: extra, extra_count: DB.extras.length,
+            income_total: round2(paid + extra),
+            balance, status: balanceStatus(balance),
+            outstanding, pending_orders: pending.length, settled: pending.length === 0,
+            projected_balance: projected, projected_status: balanceStatus(projected),
+            shrinkage_value: shrinkage,
+            shrinkage_covered: round2(Math.min(extra, shrinkage)),
+            shrinkage_uncovered: round2(Math.max(0, shrinkage - extra)),
+            extra_surplus: round2(Math.max(0, extra - shrinkage)),
+        };
+    }
+
     function reportsSummary(basis = "sales") {
         const now = new Date();
         const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -551,6 +645,7 @@
             next_due_date: dueTime(),
             low_stock_products: lowStock,
             margin_month: marginsFor(monthStart, nextMonth, basis).totals,
+            store_balance: storeBalance(),
         };
     }
 
@@ -780,6 +875,20 @@
             record: "store",
             details: reportsSummary().next_due_date || "not configured",
         });
+        const bal = storeBalance();
+        add("store_balance", { record: "purchases", count: bal.purchases_count, amount: bal.purchases_total, details: "money spent on goods" });
+        add("store_balance", { record: "paid_orders", amount: bal.paid_total, details: "orders marked paid" });
+        add("store_balance", { record: "extra_payments", count: bal.extra_count, amount: bal.extra_total, details: "paid on top of debts; covers shrinkage" });
+        add("store_balance", { record: "balance", amount: bal.balance, details: bal.status });
+        add("store_balance", { record: "outstanding", count: bal.pending_orders, amount: bal.outstanding, details: "credit not yet paid" });
+        add("store_balance", { record: "projected_balance", amount: bal.projected_balance, details: "if everybody pays: " + bal.projected_status });
+        add("store_balance", { record: "shrinkage_value", amount: bal.shrinkage_value, details: "covered by extra payments: " + bal.shrinkage_covered });
+        for (const purchase of DB.purchases.slice().sort((a, b) => a.purchased_on.localeCompare(b.purchased_on) || a.id - b.id)) {
+            add("purchases", {
+                period: purchase.purchased_on, record: "purchase", id: purchase.id,
+                name: purchase.supplier, amount: purchase.amount, details: purchase.note,
+            });
+        }
         for (const customer of DB.customers.slice().sort((a, b) => a.username.localeCompare(b.username))) {
             const orders = pending.filter((order) => order.customer_id === customer.id);
             const stats = statsFor(customer.id);
@@ -1325,25 +1434,127 @@
                 audit(actorOf(init), "customer.reset_payment", "customer", customer.username,
                     `${pending.length} order(s) marked paid: ${pending.map((o) => "#" + o.id).join(", ")}; amount ${round2(amount)}`);
             }
+            const extraAmount = round2(Number(body && body.extra_amount) || 0);
+            if (body && body.extra_amount != null && (Number(body.extra_amount) < 0 || Number.isNaN(Number(body.extra_amount)))) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "extra_amount must be 0 or more");
+            }
+            if (extraAmount > 0) addExtra(customer, extraAmount, (body && body.note) || "", actorOf(init));
             return {
                 username: customer.username,
                 settled: pending.length,
                 amount: Math.round(amount * 100) / 100,
+                extra: extraAmount > 0 ? extraAmount : 0,
             };
+        }
+        if (parts.length === 3 && parts[0] === "customers" && parts[2] === "extra-payment" && method === "POST") {
+            requireAdmin(init);
+            const customer = findCustomer(decodeURIComponent(parts[1]));
+            if (!customer) throw new ApiError(HTTP.NOT_FOUND, "Customer not found");
+            const amount = Number(body && body.amount);
+            if (!(amount > 0) || amount > 10000000) throw new ApiError(HTTP.UNPROCESSABLE, "amount must be greater than 0");
+            return response(HTTP.CREATED, addExtra(customer, round2(amount), (body.note || ""), actorOf(init)));
+        }
+        if (path === "/extra-payments" && method === "GET") {
+            requireAdmin(init);
+            return DB.extras.slice().sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)
+                .slice(0, Number(query.get("limit")) || 200).map(extraOut);
+        }
+        if (parts.length === 2 && parts[0] === "extra-payments" && method === "DELETE") {
+            requireAdmin(init);
+            const index = DB.extras.findIndex((x) => x.id === Number(parts[1]));
+            if (index < 0) throw new ApiError(HTTP.NOT_FOUND, "Extra payment not found");
+            const [extra] = DB.extras.splice(index, 1);
+            audit(actorOf(init), "customer.extra_payment_delete", "customer", extra.username,
+                `extra payment #${extra.id} of ${extra.amount.toFixed(2)} removed`);
+            return noContent();
+        }
+
+        // Purchases: what the store spent on goods (backend/routers/purchases.py).
+        if (path === "/purchases" && method === "GET") {
+            requireAdmin(init);
+            return DB.purchases.slice()
+                .sort((a, b) => b.purchased_on.localeCompare(a.purchased_on) || b.id - a.id)
+                .slice(0, Number(query.get("limit")) || 200);
+        }
+        if (path === "/purchases" && method === "POST") {
+            requireAdmin(init);
+            const amount = Number(body && body.amount);
+            if (!(amount > 0) || amount > 10000000) throw new ApiError(HTTP.UNPROCESSABLE, "amount must be greater than 0");
+            checkPurchaseDate(body.purchased_on);
+            const purchase = {
+                id: DB.nextId.purchase++, purchased_on: body.purchased_on || today(), amount: round2(amount),
+                supplier: (body.supplier || "").trim(), note: (body.note || "").trim(),
+                created_by: actorOf(init), created_at: fmtDT(new Date()),
+            };
+            DB.purchases.push(purchase);
+            audit(actorOf(init), "purchase.create", "purchase", purchase.id,
+                `${purchase.amount.toFixed(2)} on ${purchase.purchased_on}` + (purchase.supplier ? ` from ${purchase.supplier}` : ""));
+            return response(HTTP.CREATED, purchase);
+        }
+        if (parts.length === 2 && parts[0] === "purchases" && method === "PUT") {
+            requireAdmin(init);
+            const purchase = DB.purchases.find((x) => x.id === Number(parts[1]));
+            if (!purchase) throw new ApiError(HTTP.NOT_FOUND, "Purchase not found");
+            if (body.purchased_on) checkPurchaseDate(body.purchased_on);
+            if (body.amount != null) {
+                if (!(Number(body.amount) > 0) || Number(body.amount) > 10000000) throw new ApiError(HTTP.UNPROCESSABLE, "amount must be greater than 0");
+                purchase.amount = round2(Number(body.amount));
+            }
+            if (body.purchased_on) purchase.purchased_on = body.purchased_on;
+            if (body.supplier != null) purchase.supplier = body.supplier.trim();
+            if (body.note != null) purchase.note = body.note.trim();
+            audit(actorOf(init), "purchase.update", "purchase", purchase.id,
+                `${purchase.amount.toFixed(2)} on ${purchase.purchased_on}`);
+            return purchase;
+        }
+        if (parts.length === 2 && parts[0] === "purchases" && method === "DELETE") {
+            requireAdmin(init);
+            const index = DB.purchases.findIndex((x) => x.id === Number(parts[1]));
+            if (index < 0) throw new ApiError(HTTP.NOT_FOUND, "Purchase not found");
+            const [purchase] = DB.purchases.splice(index, 1);
+            audit(actorOf(init), "purchase.delete", "purchase", purchase.id,
+                `${purchase.amount.toFixed(2)} on ${purchase.purchased_on}`);
+            return noContent();
+        }
+        if (path === "/reports/balance" && method === "GET") {
+            requireAdmin(init);
+            return storeBalance();
         }
 
         if (path === "/settings" && method === "GET") {
             return { ...DB.settings };
         }
+        if (path === "/settings/payment-qr" && method === "POST") {
+            requireAdmin(init);
+            const file = body instanceof FormData ? body.get("file") : null;
+            if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+                throw new ApiError(HTTP.BAD_REQUEST, "Only PNG, JPEG, WebP and GIF images are allowed");
+            }
+            // The demo keeps the image as a data URL (there is no image folder).
+            const url = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+            return { image: url, url };
+        }
         if (parts.length === 2 && parts[0] === "settings" && method === "PUT") {
             requireAdmin(init);
-            const previous = DB.settings[parts[1]];
-            DB.settings[parts[1]] = body.value;
-            if (previous !== body.value) {
-                audit(actorOf(init), "settings.update", "setting", parts[1],
-                    `${parts[1]}: ${previous || "-"} -> ${body.value || "-"}`);
+            let value = body.value;
+            if (parts[1] === "payment_methods") value = normalizePayMethods(value);
+            if (parts[1] === "pay_instructions" && value.length > 500) {
+                throw new ApiError(HTTP.UNPROCESSABLE, "pay_instructions must be at most 500 characters");
             }
-            return { key: parts[1], value: body.value };
+            const previous = DB.settings[parts[1]];
+            DB.settings[parts[1]] = value;
+            if (previous !== value) {
+                audit(actorOf(init), "settings.update", "setting", parts[1],
+                    parts[1] === "payment_methods"
+                        ? `${JSON.parse(value).length} payment method(s), ${JSON.parse(value).filter((m) => m.enabled).length} shown`
+                        : `${parts[1]}: ${previous || "-"} -> ${value || "-"}`);
+            }
+            return { key: parts[1], value };
         }
 
         if (path === "/auth/login" && method === "POST") {

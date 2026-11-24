@@ -54,7 +54,8 @@ backend/
   main.py          app wiring, CORS, mounts /api/images, runs migrate()+seed() at startup
   config.py        Settings (pydantic-settings, env_file=".env"), SECRET_KEY handling
   database.py      SQLite engine + session (read DATABASE_PATH at import time)
-  models.py        User, Category, Product, Customer, Order, OrderItem, Restock, StockAdjustment, Setting
+  models.py        User, Category, Product, Customer, Order, OrderItem, Restock, StockAdjustment, Purchase,
+                   ExtraPayment, Setting
   migrations.py    idempotent SQLite ALTER TABLE-style migrations + ADDED_COLUMNS, run at startup
   seed.py          admin user (ADMIN_PASSWORD or random) + demo categories/products/settings
   audit.py         audit.record(db, actor, action, ...) helper (no commit; caller commits)
@@ -63,9 +64,11 @@ backend/
   security.py      bcrypt + JWT auth, OAuth2 bearer
   timeutil.py      utcnow()        # naive UTC. NEVER use datetime.utcnow()
   due_dates.py     payment_due_date parsing/computation helpers
+  payment_info.py  validation of the public `payment_methods` / `pay_instructions` settings (Pay screen)
   schemas.py       Pydantic v2 response/serialization schemas
-  routers/         auth, audit, categories, customers, inventory (counts), orders, products,
-                   reports (incl. shrinkage, reorder), restocks, settings, system (status + backups), users
+  routers/         auth, audit, categories, customers, extra_payments, inventory (counts), orders,
+                   products, purchases, reports (incl. shrinkage, reorder, balance), restocks, settings
+                   (+ QR upload), system (status + backups), users
   tests/           test_api.py (full API suite) + test_due_dates.py (units)
 frontend/
   version.json     dev placeholder; the Docker build overwrites it with release + commit
@@ -77,7 +80,7 @@ frontend/
     api.js         fetch wrapper + token storage
     app.js         entry: route handling, Store, Toast, Modal, AppInfo (footer), currency list
     customer.js    Kiosk cart/checkout + user lookup
-    admin.js       admin panel (orders, products, categories, customers, users, settings, reports)
+    admin.js       admin panel (orders, products, categories, customers, money, users, settings, reports)
     handlers.js    Actions registry (event delegation)
     debug.js       Debug panel
 scripts/
@@ -184,6 +187,34 @@ tests/e2e/
 - **Reorder suggestions**: `GET /api/reports/reorder?days=28&cover_days=14` (and `.csv`):
   for active products, suggested = ceil(sold_in_days / days * cover_days) + threshold - stock
   (only > 0 listed), sales over non-cancelled orders. CSV cells go through `csv_safe`.
+- **Money / store balance** (`reports.py::store_balance`, `GET /api/reports/balance`, also
+  `summary.store_balance` and CSV section `store_balance`): `balance = paid orders + extra
+  payments - purchases`, always computed from the rows (never a stored counter, so paid ->
+  pending, cancelled orders and edited purchases stay right) and independent of the sales
+  report basis. Orders still on credit are not in it; `projected_balance` = balance +
+  outstanding is where the store ends when everybody has paid, and `settled` (no pending
+  order) says the balance is final. `status` is plus/minus/even to the cent. Shrinkage is NOT
+  subtracted (missing goods are already a lower balance); `shrinkage_covered/uncovered` and
+  `extra_surplus` only compare the extra payments with the counted shrinkage.
+- **Purchases** (`/api/purchases`, admin; `Purchase`): money spent on goods, `amount` > 0 and
+  a `purchased_on` date (default today; any past date, so a batch can be entered afterwards;
+  not in the future), editable (`PUT`) and deletable, audited `purchase.create|update|delete`.
+- **Extra payments** (`ExtraPayment`): what a customer paid on top of their debt, entered
+  with `POST /api/customers/{u}/reset-payment` (optional body `{extra_amount, note}`; no body
+  still works) or `POST /api/customers/{u}/extra-payment`; listed/removed under
+  `/api/extra-payments`. It is store income that covers shrinkage and is NEVER credit on the
+  customer: their balance, `total_paid`, stats and statement do not change. Audited
+  `customer.extra_payment[_delete]`.
+- **Pay (how to pay)**: settings `payment_methods` (JSON list of `{type bank|phone|qr|link|
+  text, label, value, note, image, enabled}`, max 10) and `pay_instructions` (<= 500 chars)
+  are public like every setting, so `PUT /api/settings/{key}` validates and canonicalises them
+  (`payment_info.py`: control characters, lengths, `link` must be http(s)). A QR code is an
+  uploaded image (`POST /api/settings/payment-qr`, PNG/JPEG/WebP/GIF, 5 MB, saved as
+  `pay-<hex>.<ext>` in the product image folder and served from `/api/images`); a method may
+  only reference such a file that exists, and files no longer referenced are deleted on save.
+  The kiosk shows a "Pay" button only when at least one method has `enabled`; from the user
+  lookup it also shows the amount and asks for the username as the payment message. All text is
+  shown through `esc()`; there are no external QR services (CSP `img-src 'self'`, air-gapped).
 - **Account statements** are built client-side (`Admin.statementHtml`) from the admin
   lookup (`?as_admin=true`): opening = non-cancelled orders before the period - paid
   before it (by `completed_at`); + purchases - payments in it = closing. Cancelled orders
@@ -357,6 +388,10 @@ public: the README's pull instructions have no `docker login` step.
     `pin_pepper.key` there; the harness removes both at the end if the run created them
     (both are also gitignored).
   - API errors carry `err.status` (`api.js`); the kiosk PIN flow branches on 428/403/429.
+  - `page.waitForFunction(async () => ...)` does not wait for the request: to wait for a saved
+    setting poll the backend from Node (`waitForSettings`), or a following `page.goto` cancels the save.
+  - `#reset-from-modal` and `.reset-payment` both open the confirm dialog (`#confirm-reset`),
+    which also takes the optional extra amount (`#rp-extra`).
 - Local Python is frequently newer than 3.12; the pinned `requirements.txt` wheels may lack
   compatibility → install first `fastapi pydantic sqlalchemy uvicorn python-multipart
   pyjwt bcrypt pytest ruff mypy` as latest (loose) when developing locally, but never change
