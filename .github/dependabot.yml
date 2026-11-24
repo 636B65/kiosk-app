@@ -47,3 +47,9 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps(actions)"
+    ignore:
+      # ghcr.io/ossf/scorecard-action:v2.6.0 references a platform image that is
+      # missing from the registry (docker pull: manifest not found); stay on 2.5.0
+      # until a fixed release, which Dependabot will still propose.
+      - dependency-name: "ossf/scorecard-action"
+        versions: ["2.6.0"]
