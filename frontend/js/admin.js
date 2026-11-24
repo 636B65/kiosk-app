@@ -122,6 +122,7 @@ const Admin = {
             ["products", "📦", "Products"],
             ["inventory", "📋", "Inventory"],
             ["reorder", "🛒", "Reorder"],
+            ["money", "💰", "Money"],
             ["categories", "🗂️", "Categories"],
             ["orders", "🧾", "Orders"],
             ["customers", "👥", "Customers"],
@@ -167,6 +168,7 @@ const Admin = {
             case "products": return this.renderProducts();
             case "inventory": return this.renderInventory();
             case "reorder": return this.renderReorder();
+            case "money": return this.renderMoney();
             case "categories": return this.renderCategories();
             case "orders": return this.renderOrders();
             case "customers": return this.renderCustomers();
@@ -224,6 +226,7 @@ const Admin = {
                 </div>
                 <div class="stats-grid">
                     <div class="stat-card"><div class="label">Outstanding Balance</div><div class="value" style="color:var(--warning);">${fmt(summary.outstanding)}</div><div class="sub">${summary.pending_orders} unpaid order(s)</div></div>
+                    <div class="stat-card"><div class="label">Store balance</div><div class="value" style="color:${this.balanceColor(summary.store_balance.status)};">${this.signed(summary.store_balance.balance)}</div><div class="sub">${summary.store_balance.settled ? "everyone has paid" : `${this.signed(summary.store_balance.projected_balance)} if everyone pays`}</div></div>
                     <div class="stat-card"><div class="label">Today's ${word}</div><div class="value">${fmt(summary.today.revenue)}</div><div class="sub">${summary.today.order_count} order(s)</div></div>
                     <div class="stat-card"><div class="label">This week's ${word}</div><div class="value">${fmt(summary.week.revenue)}</div></div>
                     <div class="stat-card"><div class="label">This month's ${word}</div><div class="value">${fmt(summary.month.revenue)}</div></div>
@@ -814,6 +817,7 @@ const Admin = {
                                     ${c.balance > 0 ? `
                                         <button class="btn btn-success reset-payment" data-username="${encodeURIComponent(c.username)}">Reset payment</button>
                                     ` : ""}
+                                    <button class="btn btn-secondary" data-action="admin-extra-for" data-username="${encodeURIComponent(c.username)}">Extra payment</button>
                                     ${c.has_pin ? `
                                         <button class="btn btn-secondary" data-action="admin-reset-pin"
                                                 data-username="${encodeURIComponent(c.username)}"
@@ -879,14 +883,13 @@ const Admin = {
                     ${data.balance > 0 ? `
                         <button class="btn btn-success" id="reset-from-modal" data-username="${encodeURIComponent(data.customer.username)}">Reset payment</button>
                     ` : ""}
+                    <button class="btn btn-secondary" data-action="admin-extra-for" data-username="${encodeURIComponent(data.customer.username)}">Extra payment</button>
                     <button class="btn btn-secondary" data-action="modal-close">Close</button>
                 </div>
             `);
             const reset = document.getElementById("reset-from-modal");
             if (reset) {
-                reset.addEventListener("click", async () => {
-                    await this.resetPayment(data.customer.username);
-                });
+                reset.addEventListener("click", () => this.confirmResetPayment(data.customer.username));
             }
         } catch (err) {
             Toast.error(err.message);
@@ -919,24 +922,365 @@ const Admin = {
         Modal.open(`
             <h2>Reset payment</h2>
             <p>Mark all unpaid orders for <strong>${esc(username)}</strong> as paid?</p>
+            <div class="form-group">
+                <label for="rp-extra">Paid more than owed? Extra amount (optional)</label>
+                <input id="rp-extra" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+                <div style="font-size:0.8rem; color:var(--muted); margin-top:0.25rem;">
+                    The extra is income that covers shrinkage. It is not credit on the customer's balance.
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="rp-note">Note (optional)</label>
+                <input id="rp-note" maxlength="200">
+            </div>
             <div class="form-actions">
                 <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
                 <button class="btn btn-success" id="confirm-reset">Reset payment</button>
             </div>
         `);
         document.getElementById("confirm-reset").addEventListener("click", async () => {
-            await this.resetPayment(username);
+            const extra = parseFloat(document.getElementById("rp-extra").value) || 0;
+            await this.resetPayment(username, extra, document.getElementById("rp-note").value.trim());
         });
     },
 
-    async resetPayment(username) {
+    async resetPayment(username, extra = 0, note = "") {
         try {
-            const res = await API.post(`/customers/${encodeURIComponent(username)}/reset-payment`, {});
+            const body = extra > 0 ? { extra_amount: extra, note } : {};
+            const res = await API.post(`/customers/${encodeURIComponent(username)}/reset-payment`, body);
             Modal.close();
-            Toast.success(`${res.settled} order(s) settled for ${res.username} (${fmt(res.amount)})`);
+            Toast.success(`${res.settled} order(s) settled for ${res.username} (${fmt(res.amount)})` +
+                (res.extra > 0 ? `, plus ${fmt(res.extra)} extra` : ""));
             if (this.view === "customers") {
                 this.renderCustomers();
             }
+        } catch (err) {
+            Toast.error(err.message);
+        }
+    },
+
+
+    // ---- Money: what was bought in, what came in, and where the store ends up ----
+    signed(n) {
+        return (n > 0 ? "+" : "") + fmt(n);
+    },
+
+    balanceColor(status) {
+        return status === "plus" ? "var(--success)" : status === "minus" ? "var(--danger)" : "var(--muted)";
+    },
+
+    // One sentence: where the store stands. Final once nothing is on credit any more.
+    balanceSentence(b) {
+        const result = (n, status) => status === "even"
+            ? "<strong>even</strong> (zero)"
+            : `<strong style="color:${this.balanceColor(status)};">${fmt(Math.abs(n))} ${status === "plus" ? "in plus" : "in minus"}</strong>`;
+        if (b.settled) {
+            return `✅ Everyone has paid. The result is ${result(b.balance, b.status)}.`;
+        }
+        return `⏳ ${b.pending_orders} unpaid order(s) (${fmt(b.outstanding)}) are still open. Right now you are ${result(b.balance, b.status)}; ` +
+            `when everyone has paid you end ${b.projected_status === "even" ? "<strong>even</strong>" : `<strong style="color:${this.balanceColor(b.projected_status)};">${fmt(Math.abs(b.projected_balance))} ${b.projected_status === "plus" ? "in plus" : "in minus"}</strong>`}.`;
+    },
+
+    async renderMoney() {
+        const [b, purchases, extras] = await Promise.all([
+            API.get("/reports/balance"),
+            API.get("/purchases"),
+            API.get("/extra-payments?limit=100"),
+        ]);
+        const app = this.mainFor("money");
+        if (!app) return;
+        this.purchases = purchases;
+        const shrink = b.shrinkage_value > 0
+            ? `Counts found goods worth <strong>${fmt(b.shrinkage_value)}</strong> missing (shrinkage). Extra payments cover <strong>${fmt(b.shrinkage_covered)}</strong>` +
+              (b.shrinkage_uncovered > 0 ? `; <strong style="color:var(--warning);">${fmt(b.shrinkage_uncovered)}</strong> is not covered yet.` : b.extra_surplus > 0 ? `, with <strong>${fmt(b.extra_surplus)}</strong> to spare.` : ".")
+            : `No shrinkage found by counts. Extra payments (${fmt(b.extra_total)}) are income that covers shrinkage when it happens.`;
+        app.innerHTML = `
+            <div class="admin-main">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:0.5rem;">
+                    <h2 style="margin:0;">Money</h2>
+                    <div class="toolbar">
+                        <button class="btn btn-primary" data-action="admin-add-purchase">+ Add purchase</button>
+                        <button class="btn btn-secondary" data-action="admin-add-extra">+ Extra payment</button>
+                    </div>
+                </div>
+                <p style="color:var(--muted); margin-bottom:1rem;">
+                    Enter what you bought in. Customers buy on credit; when you mark them as paid the money
+                    lands here, and when everyone has paid you can see if the store ended in plus, minus or even.
+                    A purchase can be entered afterwards with its real date.
+                </p>
+                <div class="money-banner ${b.settled ? b.status : ""}" id="money-summary">${this.balanceSentence(b)}</div>
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="label">Purchases</div><div class="value">${fmt(b.purchases_total)}</div><div class="sub">${b.purchases_count} purchase(s)</div></div>
+                    <div class="stat-card"><div class="label">Paid by customers</div><div class="value">${fmt(b.paid_total)}</div><div class="sub">orders marked as paid</div></div>
+                    <div class="stat-card"><div class="label">Extra payments</div><div class="value">${fmt(b.extra_total)}</div><div class="sub">${b.extra_count} entr${b.extra_count === 1 ? "y" : "ies"}, covers shrinkage</div></div>
+                    <div class="stat-card"><div class="label">Balance now</div><div class="value" id="money-balance" style="color:${this.balanceColor(b.status)};">${this.signed(b.balance)}</div><div class="sub">${b.status}</div></div>
+                    <div class="stat-card"><div class="label">Still unpaid</div><div class="value" style="color:var(--warning);">${fmt(b.outstanding)}</div><div class="sub">${b.pending_orders} unpaid order(s)</div></div>
+                    <div class="stat-card"><div class="label">If everyone pays</div><div class="value" id="money-projected" style="color:${this.balanceColor(b.projected_status)};">${this.signed(b.projected_balance)}</div><div class="sub">${b.projected_status}</div></div>
+                </div>
+                <p style="color:var(--muted); margin:0 0 1rem;" id="money-shrinkage">${shrink}</p>
+
+                <div class="panel" id="purchases-panel">
+                    <div class="panel-header"><h3>Purchases</h3></div>
+                    ${purchases.length === 0 ? '<p style="color:var(--muted);">No purchases entered yet.</p>' : `
+                    <table>
+                        <thead><tr><th>Date</th><th>Supplier</th><th>Note</th><th>Amount</th><th></th></tr></thead>
+                        <tbody>
+                            ${purchases.map((p) => `
+                                <tr>
+                                    <td>${esc(p.purchased_on)}</td>
+                                    <td>${esc(p.supplier || "—")}</td>
+                                    <td>${esc(p.note || "")}</td>
+                                    <td><strong>${fmt(p.amount)}</strong></td>
+                                    <td class="table-actions">
+                                        <button class="btn btn-secondary" data-action="admin-edit-purchase" data-id="${p.id}">Edit</button>
+                                        <button class="btn btn-danger" data-action="admin-delete-purchase" data-id="${p.id}">Delete</button>
+                                    </td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>`}
+                </div>
+
+                <div class="panel" id="extras-panel">
+                    <div class="panel-header"><h3>Extra payments</h3></div>
+                    ${extras.length === 0 ? '<p style="color:var(--muted);">Nobody has paid more than they owed yet.</p>' : `
+                    <table>
+                        <thead><tr><th>When</th><th>Customer</th><th>Note</th><th>Amount</th><th>By</th><th></th></tr></thead>
+                        <tbody>
+                            ${extras.map((x) => `
+                                <tr>
+                                    <td>${new Date(x.created_at).toLocaleString()}</td>
+                                    <td>${esc(x.username)}</td>
+                                    <td>${esc(x.note || "")}</td>
+                                    <td><strong>${fmt(x.amount)}</strong></td>
+                                    <td>${esc(x.created_by)}</td>
+                                    <td class="table-actions"><button class="btn btn-danger" data-action="admin-delete-extra" data-id="${x.id}" data-username="${esc(encodeURIComponent(x.username))}" data-amount="${x.amount}">Remove</button></td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>`}
+                </div>
+            </div>
+        `;
+    },
+
+    openPurchaseModal(id) {
+        const purchase = id ? (this.purchases || []).find((p) => p.id === id) : null;
+        const today = new Date().toISOString().slice(0, 10);
+        Modal.open(`
+            <h2>${purchase ? "Edit purchase" : "Add purchase"}</h2>
+            <form id="purchase-form">
+                <div class="form-group">
+                    <label for="pu-amount">Amount spent</label>
+                    <input id="pu-amount" type="number" min="0.01" step="0.01" inputmode="decimal" required value="${purchase ? purchase.amount : ""}">
+                </div>
+                <div class="form-group">
+                    <label for="pu-date">Bought on</label>
+                    <input id="pu-date" type="date" max="${today}" required value="${esc(purchase ? purchase.purchased_on : today)}">
+                    <div style="font-size:0.8rem; color:var(--muted); margin-top:0.25rem;">
+                        Already bought and stocked? Enter it afterwards with the date of that purchase.
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="pu-supplier">Supplier (optional)</label>
+                    <input id="pu-supplier" maxlength="100" value="${esc(purchase?.supplier || "")}">
+                </div>
+                <div class="form-group">
+                    <label for="pu-note">Note (optional)</label>
+                    <input id="pu-note" maxlength="200" value="${esc(purchase?.note || "")}">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        `);
+        document.getElementById("pu-amount").focus();
+        document.getElementById("purchase-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const payload = {
+                amount: parseFloat(document.getElementById("pu-amount").value),
+                purchased_on: document.getElementById("pu-date").value,
+                supplier: document.getElementById("pu-supplier").value.trim(),
+                note: document.getElementById("pu-note").value.trim(),
+            };
+            try {
+                if (purchase) await API.put(`/purchases/${purchase.id}`, payload);
+                else await API.post("/purchases", payload);
+                Modal.close();
+                Toast.success(purchase ? "Purchase updated" : "Purchase added");
+                this.renderMoney();
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
+    },
+
+    confirmDeletePurchase(id) {
+        const purchase = (this.purchases || []).find((p) => p.id === id);
+        if (!purchase) return;
+        Modal.open(`
+            <h2>Delete purchase</h2>
+            <p>Delete the purchase of <strong>${fmt(purchase.amount)}</strong> from ${esc(purchase.purchased_on)}? The store balance goes up by that amount.</p>
+            <div class="form-actions">
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                <button class="btn btn-danger" id="confirm-delete-purchase">Delete</button>
+            </div>
+        `);
+        document.getElementById("confirm-delete-purchase").addEventListener("click", async () => {
+            try {
+                await API.del(`/purchases/${id}`);
+                Modal.close();
+                Toast.success("Purchase deleted");
+                this.renderMoney();
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
+    },
+
+    // A customer paid more than they owed: the surplus is store income (covers shrinkage).
+    openExtraModal(username) {
+        Modal.open(`
+            <h2>Extra payment</h2>
+            <p style="color:var(--muted);">
+                What a customer paid on top of what they owed. It counts as income that covers shrinkage;
+                it is not credit on the customer's balance.
+            </p>
+            <form id="extra-form">
+                <div class="form-group">
+                    <label for="ex-username">Customer</label>
+                    <input id="ex-username" autocomplete="off" required value="${esc(username || "")}">
+                </div>
+                <div class="form-group">
+                    <label for="ex-amount">Extra amount paid</label>
+                    <input id="ex-amount" type="number" min="0.01" step="0.01" inputmode="decimal" required>
+                </div>
+                <div class="form-group">
+                    <label for="ex-note">Note (optional)</label>
+                    <input id="ex-note" maxlength="200">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        `);
+        document.getElementById(username ? "ex-amount" : "ex-username").focus();
+        document.getElementById("extra-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const name = document.getElementById("ex-username").value.trim();
+            try {
+                await API.post(`/customers/${encodeURIComponent(name)}/extra-payment`, {
+                    amount: parseFloat(document.getElementById("ex-amount").value),
+                    note: document.getElementById("ex-note").value.trim(),
+                });
+                Modal.close();
+                Toast.success(`Extra payment saved for ${name}`);
+                if (this.view === "money") this.renderMoney();
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
+    },
+
+    confirmDeleteExtra(id, username, amount) {
+        Modal.open(`
+            <h2>Remove extra payment</h2>
+            <p>Remove the extra payment of <strong>${fmt(amount)}</strong> from <strong>${esc(username)}</strong>? Only do this if it was entered by mistake.</p>
+            <div class="form-actions">
+                <button class="btn btn-secondary" data-action="modal-close">Cancel</button>
+                <button class="btn btn-danger" id="confirm-delete-extra">Remove</button>
+            </div>
+        `);
+        document.getElementById("confirm-delete-extra").addEventListener("click", async () => {
+            try {
+                await API.del(`/extra-payments/${id}`);
+                Modal.close();
+                Toast.success("Extra payment removed");
+                this.renderMoney();
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
+    },
+
+    // ---- Settings: how customers can pay (shown by the kiosk's "Pay" button) ----
+    payMethods: [],
+
+    payMethodRow(m, i) {
+        const types = Object.entries(PAY_TYPES).map(([key, [icon, name]]) =>
+            `<option value="${key}" ${m.type === key ? "selected" : ""}>${icon} ${name}</option>`).join("");
+        const data = `data-action-input="admin-pay-field" data-index="${i}"`;
+        return `
+            <div class="pay-edit" data-pay-row="${i}">
+                <div class="pay-edit-row">
+                    <select ${data} data-field="type" aria-label="Type of payment method ${i + 1}">${types}</select>
+                    <input type="text" ${data} data-field="label" maxlength="40" placeholder="Name, e.g. Swish" value="${esc(m.label || "")}" aria-label="Name of payment method ${i + 1}">
+                    <label style="display:flex; align-items:center; gap:0.35rem; white-space:nowrap;">
+                        <input type="checkbox" ${data} data-field="enabled" ${m.enabled !== false ? "checked" : ""}> Show on kiosk
+                    </label>
+                    <button type="button" class="btn btn-danger" data-action="admin-pay-remove" data-index="${i}">Remove</button>
+                </div>
+                ${m.type === "qr" ? `
+                    <div class="pay-edit-row">
+                        ${m.image ? `<img class="pay-edit-preview" src="${esc(payQrSrc(m.image))}" alt="QR code">` : ""}
+                        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-action-input="admin-pay-qr" data-index="${i}" aria-label="QR code image ${i + 1}">
+                    </div>
+                ` : ""}
+                <div class="pay-edit-row">
+                    ${m.type === "text"
+                        ? `<textarea ${data} data-field="value" rows="2" maxlength="300" placeholder="Instructions">${esc(m.value || "")}</textarea>`
+                        : `<input type="text" ${data} data-field="value" maxlength="300"
+                                 placeholder="${m.type === "bank" ? "Account number / IBAN" : m.type === "phone" ? "Phone number" : m.type === "link" ? "https://…" : "Caption (optional)"}"
+                                 value="${esc(m.value || "")}" aria-label="Value of payment method ${i + 1}">`}
+                </div>
+                <div class="pay-edit-row">
+                    <input type="text" ${data} data-field="note" maxlength="300" placeholder="Extra note (optional)" value="${esc(m.note || "")}" aria-label="Note of payment method ${i + 1}">
+                </div>
+            </div>`;
+    },
+
+    renderPayEditor() {
+        const box = document.getElementById("pay-methods-editor");
+        if (!box) return;
+        box.innerHTML = this.payMethods.length === 0
+            ? '<p style="color:var(--muted); font-size:0.9rem;">No payment methods yet. The kiosk shows the Pay button only when at least one is shown.</p>'
+            : this.payMethods.map((m, i) => this.payMethodRow(m, i)).join("");
+        const add = document.getElementById("pay-add");
+        if (add) add.disabled = this.payMethods.length >= 10;
+    },
+
+    addPayMethod() {
+        if (this.payMethods.length >= 10) return;
+        this.payMethods.push({ type: "phone", label: "", value: "", note: "", image: "", enabled: true });
+        this.renderPayEditor();
+    },
+
+    removePayMethod(i) {
+        this.payMethods.splice(i, 1);
+        this.renderPayEditor();
+    },
+
+    setPayField(el) {
+        const method = this.payMethods[parseInt(el.dataset.index)];
+        if (!method) return;
+        const field = el.dataset.field;
+        method[field] = el.type === "checkbox" ? el.checked : el.value;
+        if (field === "type") this.renderPayEditor();
+    },
+
+    async uploadPayQr(el) {
+        const method = this.payMethods[parseInt(el.dataset.index)];
+        const file = el.files && el.files[0];
+        if (!method || !file) return;
+        const form = new FormData();
+        form.append("file", file);
+        try {
+            const res = await API.upload("/settings/payment-qr", form);
+            method.image = res.image;
+            this.renderPayEditor();
+            Toast.success("QR code uploaded. Save the settings to use it.");
         } catch (err) {
             Toast.error(err.message);
         }
@@ -1733,6 +2077,14 @@ const Admin = {
         } catch {}
         const app = this.mainFor("settings");
         if (!app) return;
+        this.payMethods = parsePayMethods(settings.payment_methods).map((m) => ({
+            type: PAY_TYPES[m.type] ? m.type : "text",
+            label: m.label || "",
+            value: m.value || "",
+            note: m.note || "",
+            image: m.image || "",
+            enabled: m.enabled !== false,
+        }));
         const dueDate = settings.payment_due_date ?? "";
         app.innerHTML = `
             <div class="admin-main">
@@ -1764,6 +2116,16 @@ const Admin = {
                             date (default).
                             ${nextDue?.next_due_date ? ` · Next due: <strong>${new Date(nextDue.next_due_date).toLocaleDateString()}</strong>` : ""}
                         </div>
+                    </div>
+                    <div class="form-group" style="border-top:1px solid var(--border); padding-top:1rem;">
+                        <label>How customers can pay (the kiosk's "Pay" button)</label>
+                        <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.5rem;">
+                            Choose what customers see when they tap Pay: bank account, a phone number (e.g. Swish),
+                            a QR code, a link or free text. Only methods marked "Show on kiosk" are shown.
+                        </div>
+                        <textarea id="s-pay_instructions" rows="2" maxlength="500" placeholder="Short instruction above the payment methods (optional)">${esc(settings.pay_instructions || "")}</textarea>
+                        <div id="pay-methods-editor" style="margin-top:0.75rem;"></div>
+                        <button type="button" class="btn btn-secondary" id="pay-add" data-action="admin-pay-add">+ Add payment method</button>
                     </div>
                     <div class="form-group">
                         <label style="display:flex; align-items:center; gap:0.5rem;">
@@ -1815,6 +2177,7 @@ const Admin = {
                 </div>
             </div>
         `;
+        this.renderPayEditor();
     },
 
     async saveSettings() {
@@ -1829,6 +2192,8 @@ const Admin = {
             kiosk_idle_seconds: String(Math.max(0, parseInt(document.getElementById("s-kiosk_idle_seconds").value) || 0)),
             backup_interval_hours: String(Math.max(0, parseInt(document.getElementById("s-backup_interval_hours").value) || 0)),
             backup_keep: String(Math.min(365, Math.max(1, parseInt(document.getElementById("s-backup_keep").value) || 7))),
+            pay_instructions: document.getElementById("s-pay_instructions").value.trim(),
+            payment_methods: JSON.stringify(this.payMethods),
         };
         try {
             for (const [key, value] of Object.entries(fields)) {

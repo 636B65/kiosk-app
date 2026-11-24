@@ -23,6 +23,7 @@
     --ok-fg: #166534;
     --bad-bg: #fee2e2;
     --bad-fg: #991b1b;
+    --qr-bg: #ffffff;
 }
 
 /* Dark theme. The footer's theme switch (js/theme.js) sets data-theme on <html>:
@@ -53,6 +54,7 @@
         --ok-fg: #86efac;
         --bad-bg: #450a0a;
         --bad-fg: #fca5a5;
+    --qr-bg: #ffffff;
     }
 }
 
@@ -80,6 +82,7 @@
     --ok-fg: #86efac;
     --bad-bg: #450a0a;
     --bad-fg: #fca5a5;
+    --qr-bg: #ffffff;
 }
 
 :root[data-theme="light"] {
@@ -1402,3 +1405,58 @@ tfoot th { text-align: left; border-top: 2px solid var(--border); }
         padding: 0;
     }
 }
+
+
+/* Pay dialog (kiosk) */
+.pay-instructions { white-space: pre-line; margin: 0 0 0.75rem; }
+.pay-reference {
+    margin: 0 0 1rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--primary-softer);
+    border-radius: 0.5rem;
+    text-align: center;
+}
+.pay-methods { display: grid; gap: 0.75rem; margin-bottom: 1rem; }
+.pay-method {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: 0.75rem;
+    padding: 0.9rem 1rem;
+}
+.pay-method-head { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; margin-bottom: 0.35rem; }
+.pay-value { font-size: 1.35rem; font-weight: 700; word-break: break-word; letter-spacing: 0.02em; }
+.pay-value.pay-text { font-size: 1.05rem; font-weight: 500; white-space: pre-line; }
+.pay-note { color: var(--muted); font-size: 0.9rem; margin-top: 0.35rem; white-space: pre-line; }
+/* A QR code needs its white quiet zone in the dark theme too (--qr-bg is white in both). */
+.pay-qr {
+    display: block;
+    margin: 0.6rem auto;
+    width: min(100%, 280px);
+    height: auto;
+    background: var(--qr-bg);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+}
+
+/* Payment info editor (admin settings) */
+.pay-edit {
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background: var(--surface-2);
+}
+.pay-edit-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem; }
+.pay-edit-row > input[type="text"], .pay-edit-row > textarea { flex: 1 1 12rem; }
+.pay-edit-preview { max-width: 140px; max-height: 140px; background: var(--qr-bg); padding: 0.25rem; border-radius: 0.4rem; }
+
+/* Money view (admin) */
+.money-banner {
+    border-left: 4px solid var(--muted);
+    background: var(--surface-2);
+    border-radius: 0.5rem;
+    padding: 0.8rem 1rem;
+    margin-bottom: 1rem;
+}
+.money-banner.plus { border-left-color: var(--success); }
+.money-banner.minus { border-left-color: var(--danger); }

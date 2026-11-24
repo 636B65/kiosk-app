@@ -248,6 +248,30 @@ function specialState(p) {
 
 const isLowStock = (p) => p.stock <= (p.low_stock_threshold ?? 5);
 
+// How customers can pay: the admin's list (public setting `payment_methods`, JSON).
+const PAY_TYPES = {
+    bank: ["🏦", "Bank"],
+    phone: ["📱", "Phone"],
+    qr: ["▦", "QR code"],
+    link: ["🔗", "Link"],
+    text: ["📝", "Other"],
+};
+
+function parsePayMethods(raw) {
+    try {
+        const list = JSON.parse(raw || "[]");
+        return Array.isArray(list) ? list.filter((m) => m && typeof m === "object") : [];
+    } catch {
+        return [];
+    }
+}
+
+// Uploaded QR codes are served from the image folder (the demo keeps them as data URLs).
+function payQrSrc(image) {
+    if (typeof image === "string" && image.startsWith("data:image/")) return image;
+    return `/api/images/${encodeURIComponent(image || "")}`;
+}
+
 function fmtBytes(bytes) {
     if (bytes == null) return "—";
     const units = ["B", "KB", "MB", "GB"];
